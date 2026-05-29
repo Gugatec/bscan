@@ -4,20 +4,20 @@ set -euo pipefail
 
 # --- ANSI Color Palette ---
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
-CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
+CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 
 # --- Error trap ---
 trap 'echo -e "\n${RED}[ERROR]${RESET} Script failed at line $LINENO. Exit code: $?" >&2' ERR
 
-# --- Resolve bscan repo dir even when run via symlink ---
+# --- Resolve repo dir even when launched via symlink ---
 _REAL_SCRIPT="$(readlink "$0" 2>/dev/null || echo "$0")"
 BSCAN_REPO_DIR="$(cd "$(dirname "$_REAL_SCRIPT")" && pwd)"
+ENV_FILE="$BSCAN_REPO_DIR/.env"
+ENV_SAMPLE="$BSCAN_REPO_DIR/.env-sample"
 
-# --- Persistent Configuration File Setup ---
-CONFIG_FILE="$HOME/.bumblebee_scan_config"
-
+# --- Default values ---
 DEFAULT_BUMBLEBEE_DIR="$HOME/bumblebee"
-DEFAULT_SCAN_ROOT="/Users"
+DEFAULT_SCAN_ROOT="$HOME"
 DEFAULT_OUTPUT_FORMAT="human"
 DEFAULT_EXPORT_REPORT="yes"
 DEFAULT_LOG_DIR="$HOME/_scripts/LOGS"
@@ -25,9 +25,14 @@ DEFAULT_RETENTION_DAYS="180"
 DEFAULT_SYNC_BSCAN_REPO="yes"
 DEFAULT_SYNC_CATALOG="yes"
 
+# ---------------------------------------------------------------------------
+# Config I/O
+# ---------------------------------------------------------------------------
+
 load_config() {
-    if [ -f "$CONFIG_FILE" ]; then
-        source "$CONFIG_FILE"
+    if [[ -f "$ENV_FILE" ]]; then
+        # shellcheck source=/dev/null
+        source "$ENV_FILE"
     fi
     BUMBLEBEE_DIR="${BUMBLEBEE_DIR:-$DEFAULT_BUMBLEBEE_DIR}"
     SCAN_ROOT="${SCAN_ROOT:-$DEFAULT_SCAN_ROOT}"
@@ -40,7 +45,8 @@ load_config() {
 }
 
 save_config() {
-    cat << EOF > "$CONFIG_FILE"
+    cat > "$ENV_FILE" << EOF
+# bscan local configuration — DO NOT COMMIT this file
 BUMBLEBEE_DIR="$BUMBLEBEE_DIR"
 SCAN_ROOT="$SCAN_ROOT"
 OUTPUT_FORMAT="$OUTPUT_FORMAT"
@@ -66,9 +72,90 @@ reset_config() {
     sleep 1
 }
 
-load_config
+# ---------------------------------------------------------------------------
+# First-run setup wizard
+# ---------------------------------------------------------------------------
 
-# --- Main Configuration Control Panel ---
+_prompt_value() {
+    local label="$1" default="$2" varname="$3"
+    echo -e "  ${BOLD}${label}${RESET}"
+    echo -e "  ${DIM}Default: ${default}${RESET}"
+    read -rp "  > " input_val
+    if [[ -n "$input_val" ]]; then
+        printf -v "$varname" '%s' "$input_val"
+    else
+        printf -v "$varname" '%s' "$default"
+    fi
+    echo ""
+}
+
+first_run_setup() {
+    clear
+    echo -e "${CYAN}${BOLD}"
+    echo "  ╔═══════════════════════════════════════════════════════╗"
+    echo "  ║           BSCAN — FIRST RUN SETUP WIZARD             ║"
+    echo "  ╠═══════════════════════════════════════════════════════╣"
+    echo "  ║  No .env file found. Let's configure your settings.  ║"
+    echo "  ║  Press ENTER to accept the default for each value.   ║"
+    echo "  ╚═══════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+
+    _prompt_value "[1/8] Bumblebee home directory" "$DEFAULT_BUMBLEBEE_DIR" BUMBLEBEE_DIR
+    _prompt_value "[2/8] System scan root path"    "$DEFAULT_SCAN_ROOT"     SCAN_ROOT
+    _prompt_value "[3/8] Log directory"            "$DEFAULT_LOG_DIR"       LOG_DIR
+    _prompt_value "[4/8] Log retention (days)"     "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
+
+    echo -e "  ${BOLD}[5/8] Output format${RESET}"
+    echo -e "  ${DIM}Default: human${RESET}  (human = dashboard, raw = NDJSON)"
+    read -rp "  > " _fmt
+    OUTPUT_FORMAT="${_fmt:-human}"
+    [[ "$OUTPUT_FORMAT" != "raw" ]] && OUTPUT_FORMAT="human"
+    echo ""
+
+    echo -e "  ${BOLD}[6/8] Auto-export report after scan? [yes/no]${RESET}"
+    echo -e "  ${DIM}Default: yes${RESET}"
+    read -rp "  > " _exp
+    _exp=$(echo "${_exp:-yes}" | tr '[:upper:]' '[:lower:]')
+    EXPORT_REPORT=$([[ "$_exp" == "no" ]] && echo "no" || echo "yes")
+    echo ""
+
+    echo -e "  ${BOLD}[7/8] Sync bscan repo before each run? [yes/no]${RESET}"
+    echo -e "  ${DIM}Default: yes${RESET}"
+    read -rp "  > " _sbr
+    _sbr=$(echo "${_sbr:-yes}" | tr '[:upper:]' '[:lower:]')
+    SYNC_BSCAN_REPO=$([[ "$_sbr" == "no" ]] && echo "no" || echo "yes")
+    echo ""
+
+    echo -e "  ${BOLD}[8/8] Sync threat catalog before each run? [yes/no]${RESET}"
+    echo -e "  ${DIM}Default: yes${RESET}"
+    read -rp "  > " _sc
+    _sc=$(echo "${_sc:-yes}" | tr '[:upper:]' '[:lower:]')
+    SYNC_CATALOG=$([[ "$_sc" == "no" ]] && echo "no" || echo "yes")
+    echo ""
+
+    save_config
+
+    echo -e "${GREEN}${BOLD}  ✔ Configuration saved to: ${ENV_FILE}${RESET}"
+    echo -e "${DIM}  Edit .env directly or use the config panel at any time.${RESET}"
+    echo ""
+    read -rp "  Press ENTER to continue to the scanner..."
+    echo ""
+}
+
+# ---------------------------------------------------------------------------
+# Boot: first-run check then load config
+# ---------------------------------------------------------------------------
+
+if [[ ! -f "$ENV_FILE" ]]; then
+    first_run_setup
+else
+    load_config
+fi
+
+# ---------------------------------------------------------------------------
+# Main Configuration Control Panel
+# ---------------------------------------------------------------------------
+
 while true; do
     clear
     echo -e "${CYAN}${BOLD}=========================================================${RESET}"
@@ -94,9 +181,7 @@ while true; do
         1)
             read -rp "Enter new Bumblebee Directory Path: " input_val
             if [[ -n "$input_val" ]]; then
-                if [[ ! -d "$input_val" ]]; then
-                    echo -e "${YELLOW}Warning: Directory does not exist yet. Saving anyway.${RESET}"
-                fi
+                [[ ! -d "$input_val" ]] && echo -e "${YELLOW}Warning: Directory does not exist yet. Saving anyway.${RESET}"
                 BUMBLEBEE_DIR="$input_val"; save_config
             fi
             ;;
@@ -161,7 +246,10 @@ done
 CATALOG_PATH="${BUMBLEBEE_DIR}/threat_intel/"
 SCAN_START=$(date +%s)
 
-# --- Profile Selection Menu ---
+# ---------------------------------------------------------------------------
+# Profile Selection
+# ---------------------------------------------------------------------------
+
 echo ""
 echo -e "${CYAN}${BOLD}Select Bumblebee Scan Profile:${RESET}"
 echo "  1) Baseline          (Quick global packages/extensions checklist)"
@@ -188,7 +276,10 @@ if [[ -n "$final_confirm" && "$final_confirm" != "y" && "$final_confirm" != "yes
     exit 0
 fi
 
-# --- Repository Sync ---
+# ---------------------------------------------------------------------------
+# Repository Sync
+# ---------------------------------------------------------------------------
+
 echo ""
 if [[ "$SYNC_BSCAN_REPO" == "yes" ]]; then
     echo -e "${CYAN}==> Syncing bscan repo...${RESET}"
@@ -199,7 +290,7 @@ fi
 
 if [[ "$SYNC_CATALOG" == "yes" ]]; then
     echo -e "${CYAN}==> Syncing threat catalog...${RESET}"
-    if [ -d "$BUMBLEBEE_DIR" ]; then
+    if [[ -d "$BUMBLEBEE_DIR" ]]; then
         git -C "$BUMBLEBEE_DIR" pull
     else
         echo -e "${RED}ERROR: Bumblebee directory missing at $BUMBLEBEE_DIR${RESET}"
@@ -209,19 +300,25 @@ else
     echo -e "${YELLOW}-- Threat catalog sync skipped (disabled in config)${RESET}"
 fi
 
-if [ ! -d "$CATALOG_PATH" ]; then
+if [[ ! -d "$CATALOG_PATH" ]]; then
     echo -e "${RED}ERROR: Threat catalog missing at $CATALOG_PATH${RESET}"
     exit 1
 fi
 
-# --- Log Housekeeping ---
-if [ -d "$LOG_DIR" ]; then
+# ---------------------------------------------------------------------------
+# Log Housekeeping
+# ---------------------------------------------------------------------------
+
+if [[ -d "$LOG_DIR" ]]; then
     echo -e "${CYAN}==> Performing Log Purge (entries older than $RETENTION_DAYS days)...${RESET}"
     find "$LOG_DIR" -type f -name "*.txt"    -mtime +"$RETENTION_DAYS" -exec rm -f {} \;
     find "$LOG_DIR" -type f -name "*.ndjson" -mtime +"$RETENTION_DAYS" -exec rm -f {} \;
 fi
 
-# --- Scan Execution ---
+# ---------------------------------------------------------------------------
+# Scan Execution
+# ---------------------------------------------------------------------------
+
 echo ""
 echo -e "${CYAN}==> Launching ${BOLD}$SCAN_PROFILE${RESET}${CYAN} sweep...${RESET}"
 echo "    [Evaluating local code repositories against signatures...]"
@@ -235,7 +332,10 @@ RAW_OUTPUT=$(sudo bumblebee scan \
 SCAN_END=$(date +%s)
 ELAPSED=$(( SCAN_END - SCAN_START ))
 
-# --- Formatter and Engine Pipeline ---
+# ---------------------------------------------------------------------------
+# Output Formatters
+# ---------------------------------------------------------------------------
+
 _parse_findings() {
     if command -v jq &>/dev/null; then
         echo "$RAW_OUTPUT" | jq -r '
@@ -265,9 +365,9 @@ _parse_summary() {
     else
         echo "$RAW_OUTPUT" | awk -F',' '/"record_type":"scan_summary"/{
             for(i=1;i<=NF;i++){
-                if($i~/"files_considered"/)          print "  Files Audited      : " $i;
+                if($i~/"files_considered"/)           print "  Files Audited      : " $i;
                 if($i~/"package_records_suppressed"/) print "  Packages Checked   : " $i;
-                if($i~/"status"/)                    print "  Engine Status      : " $i;
+                if($i~/"status"/)                     print "  Engine Status      : " $i;
             }
         }' | sed -E 's/"//g; s/[{}]//g; s/^[[:space:]]*//'
     fi
@@ -302,12 +402,14 @@ else
     echo "$HUMAN_DASHBOARD"
 fi
 
-# --- Alert on Critical Findings ---
 if [[ "$FINDING_COUNT" -gt 0 ]]; then
     echo -e "\n${RED}${BOLD}[!] ALERT: $FINDING_COUNT finding(s) detected. Review the report above.${RESET}"
 fi
 
-# --- Automated Export ---
+# ---------------------------------------------------------------------------
+# Automated Export
+# ---------------------------------------------------------------------------
+
 if [[ "$EXPORT_REPORT" == "yes" ]]; then
     mkdir -p "$LOG_DIR"
     TIMESTAMP=$(date '+%Y_%m_%d_%H%M%S')
