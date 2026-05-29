@@ -1,20 +1,27 @@
 # bscan
 
-An interactive Bash wrapper for the [Bumblebee](https://github.com/perplexityai/bumblebee) malicious-package scanner. Provides a persistent configuration panel, scan profile selection, threat catalog syncing, log management, and formatted report export — all from a single terminal script.
+An interactive Bash wrapper for the [Bumblebee](https://github.com/perplexityai/bumblebee) malicious-package scanner. Provides a fully guided first-run setup, persistent configuration panel, scan profile selection, threat catalog syncing, log management, and formatted report export — all from a single terminal script.
+
+Compatible with **macOS** (Apple Silicon and Intel) and **Linux** (Debian, Ubuntu, Fedora, RHEL, CentOS, openSUSE, Arch).
 
 ---
 
 ## Requirements
 
+Only three things need to exist before running bscan for the first time:
+
 | Dependency | Purpose |
 |---|---|
-| `bash` ≥ 3.2 | Script runtime (macOS system bash and Linux supported) |
-| [`bumblebee`](https://github.com/perplexityai/bumblebee) | The underlying scanner engine (requires Node.js) |
-| `git` | Syncing bscan and threat catalog repos |
-| `sudo` | Required by `bumblebee scan` |
-| `jq` *(optional)* | Faster/more reliable NDJSON parsing; falls back to `awk` if absent |
+| `bash` ≥ 3.2 | Script runtime |
+| `git` | Cloning repos and syncing the threat catalog |
+| `curl` | Downloading the Homebrew installer (if needed) |
 
-The script is compatible with **macOS** and **Linux**. All tools used (`date`, `find`, `sed`, `awk`, `mktemp`, `tee`, `git`) are standard POSIX/GNU utilities available on both platforms.
+Everything else — **Homebrew**, **Go**, and the **bumblebee binary** — is detected and optionally installed automatically by the setup wizard.
+
+| Also used at runtime | Purpose |
+|---|---|
+| `sudo` | Required by `bumblebee scan` to read protected paths |
+| `jq` *(optional)* | Faster NDJSON parsing; falls back to `awk` if absent |
 
 ---
 
@@ -32,13 +39,13 @@ chmod +x bscan.sh
 ./bscan.sh
 ```
 
-The setup wizard will offer to install a `bscan` command (symlink into `~/.local/bin` or `~/bin`) so you can run `bscan` from anywhere. The script resolves symlinks at runtime, so it always finds its own `.env` regardless of where it is launched from.
+The setup wizard walks you through every required setting and handles all dependency installation. At step 9 it offers to install a `bscan` symlink so you can run `bscan` from anywhere in your terminal.
 
 ---
 
-## First Run
+## First Run — Setup Wizard
 
-The first time `bscan.sh` is executed it detects the missing `.env` and launches an interactive **setup wizard**:
+The first time `bscan.sh` is executed it detects the missing `.env` file and launches an interactive **9-step setup wizard**:
 
 ```
   ╔═══════════════════════════════════════════════════════╗
@@ -47,88 +54,220 @@ The first time `bscan.sh` is executed it detects the missing `.env` and launches
   ║  No .env found. Let's configure your environment.    ║
   ║  Required fields are marked — others have defaults.  ║
   ╚═══════════════════════════════════════════════════════╝
-
-  [1/8] Bumblebee home directory
-  Your local clone of the bumblebee GitHub repo
-  > _
 ```
 
-| Step | Field | Behaviour |
-|---|---|---|
-| 1 | Bumblebee home directory | **Required.** Re-prompts until a value is entered. After confirming the path, the wizard checks whether the bumblebee repo exists there (see below). |
-| 2 | Scan root path | **Required.** Re-prompts until a value is entered. |
-| 3 | Log directory | **Required.** Checks if the path exists and is writable; attempts `mkdir -p` if not; re-prompts on failure. |
-| 4–8 | All others | Optional — press **ENTER** to accept the shown default. |
-| — | Install `bscan` command | Offers to create a symlink in `~/.local/bin` (or `~/bin`) so `bscan` is available system-wide. Warns if the target directory is not yet in `PATH`. |
-
-Path inputs accept shell variables (`$HOME`, `$USER`, `~`). They are expanded immediately so the stored value is always an absolute path.
-
-### Bumblebee repo check
-
-Immediately after step 1, the wizard verifies the bumblebee repo exists at the given path:
-
-- **Found** → confirms with `✔ Bumblebee repo found.`
-- **Not found** → offers to clone `https://github.com/perplexityai/bumblebee` directly. You can confirm the default path or enter a different install location. If you decline, the path is saved and you can install manually before running scans.
-
-The wizard also checks whether the `bumblebee` CLI is available in `PATH` and shows a warning with the install URL if not.
-
-The same clone-on-demand prompt appears during normal runs if the repo is missing and `SYNC_CATALOG=yes`.
-
-On completion the wizard writes `.env` into the repo directory. This file is gitignored and stays local to your machine. To re-run the wizard at any time, delete `.env` and restart the script.
+Path inputs accept shell variables (`$HOME`, `$USER`, `~`). All paths are expanded to absolute values immediately so the stored `.env` is always portable.
 
 ---
 
-## Configuration
+### Step 1 — Bumblebee home directory *(required)*
 
-Settings are stored in `.env` (gitignored, auto-generated on first run). A safe template with placeholder values is provided in `.env-sample`.
+**What it asks:** The filesystem path where the bumblebee repo should live (e.g. `~/bumblebee`).
 
-| Variable | Default | Description |
-|---|---|---|
-| `BUMBLEBEE_DIR` | *(required)* | Path to your local bumblebee clone |
-| `SCAN_ROOT` | *(required)* | Root directory bumblebee will scan recursively |
-| `LOG_DIR` | *(required)* | Directory where report files are written |
-| `OUTPUT_FORMAT` | `human` | `human` = formatted dashboard, `raw` = NDJSON passthrough |
-| `EXPORT_REPORT` | `yes` | Auto-save a report file after each scan |
-| `RETENTION_DAYS` | `180` | Delete report files older than this many days |
-| `SYNC_BSCAN_REPO` | `yes` | Check for bscan updates before each run and offer to pull when behind |
-| `SYNC_CATALOG` | `yes` | Pull latest threat signatures from bumblebee repo before each run |
-| `SCAN_MODE` | `spinner` | `spinner` = progress indicator, `verbose` = live output stream |
+**What it accomplishes — in order:**
 
-You can edit `.env` directly or use the **Configuration Control Panel** shown at the start of every run:
+#### 1a. Path normalisation
+If the path you enter does not already end in `/bumblebee`, the wizard appends it automatically so the directory structure is always consistent.
+
+#### 1b. Repo clone
+Checks whether a valid git repository exists at the given path.
+
+- **Found** → confirms and moves on.
+- **Not found** → offers to clone `https://github.com/perplexityai/bumblebee` directly. You can confirm the default path or enter a different destination. The bumblebee repo contains the **threat catalog** (`threat_intel/`) used by every scan — it must be present.
+
+#### 1c. Go installation check
+Checks whether the `go` binary is available. Go is required to compile and install the bumblebee CLI binary.
+
+- **Found** → moves on to 1d.
+- **Not found** → offers to install Go automatically. Answering **Y** triggers the following chain:
+
+  **1c-i. Homebrew check (if Go is missing)**
+  Checks whether `brew` is available.
+  - **Found** → proceeds directly to installing Go.
+  - **Not found** → installs Homebrew first.
+
+  **On Linux only**, before running the Homebrew installer, bscan installs the system packages Homebrew requires. It auto-detects the package manager and runs the appropriate command:
+
+  | Distro family | Package manager | Packages installed |
+  |---|---|---|
+  | Debian / Ubuntu | `apt-get` | `build-essential procps curl file git` |
+  | Fedora / RHEL 8+ | `dnf` | `Development Tools` group + `procps-ng curl file git` |
+  | CentOS / RHEL 7 | `yum` | `Development Tools` group + `procps-ng curl file git` |
+  | openSUSE | `zypper` | `gcc make curl file git procps` |
+  | Arch Linux | `pacman` | `base-devel curl file git procps-ng` |
+  | Unknown distro | — | Prints the required package names and asks you to install them manually, then re-run bscan |
+
+  On **macOS**, Homebrew's own installer handles the only dependency (Xcode Command Line Tools) automatically — no extra step needed.
+
+  After Homebrew is installed, bscan:
+  - Detects the correct prefix (`/opt/homebrew` on Apple Silicon, `/home/linuxbrew/.linuxbrew` on Linux, `/usr/local` on Intel Mac)
+  - Appends `eval "$(brew shellenv)"` to your shell rc file (`~/.zshrc` or `~/.bashrc`, detected from `$SHELL`)
+  - Activates Homebrew in the current terminal session immediately
+
+  **1c-ii. Go install via Homebrew**
+  Runs `brew install go`, then:
+  - Appends `export PATH="$(go env GOPATH)/bin:$PATH"` to your shell rc file
+  - Exports the path in the current session so `go` is usable immediately
+
+#### 1d. Bumblebee CLI installation check
+Uses `_find_bumblebee_bin` to locate the bumblebee binary across five locations in order: system `PATH`, `$GOBIN`, `$GOPATH/bin`, `~/go/bin` (the default `go install` target), and a local build inside the repo clone.
+
+- **Found** → confirms the path and moves on.
+- **Not found** → offers to run `go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest`. If you accept:
+  - Installs the binary into Go's bin directory
+  - Appends that directory to your shell rc file (idempotent — skipped if already present)
+  - Exports it into the current session so the binary is available immediately without opening a new terminal
+
+> **Note:** The wizard loops back to the path prompt if the repo cannot be found or cloned — it will not proceed until bumblebee's repo is confirmed present.
+
+---
+
+### Step 2 — Scan root path *(required)*
+
+**What it asks:** The root directory bumblebee will scan recursively.
+
+**What it accomplishes:** Sets `SCAN_ROOT` in `.env`. The wizard shows a platform-appropriate example:
+- macOS: `/Users` (all user home directories) or `/` (full system)
+- Linux: `/home` (all user home directories) or `/` (full system)
+
+Re-prompts until a non-empty value is entered. When `SCAN_ROOT` is set to `/`, a warning is displayed before each scan confirming the intent to scan the entire filesystem.
+
+---
+
+### Step 3 — Log directory *(required)*
+
+**What it asks:** The directory where scan reports will be written.
+
+**What it accomplishes:**
+
+1. **`/bscan` append prompt** — if the path you enter does not already end in `/bscan`, the wizard offers to append it, keeping all bscan reports in their own subdirectory.
+2. **Directory validation** — checks whether the path exists and is writable.
+3. **Auto-creation** — if the directory does not exist, attempts `mkdir -p`. Re-prompts if creation fails (e.g. permission denied).
+
+---
+
+### Step 4 — Log retention *(optional, default: 180 days)*
+
+**What it asks:** How many days to keep report files before they are automatically purged.
+
+**What it accomplishes:** Sets `RETENTION_DAYS`. At the start of each run, bscan deletes `.txt` and `.ndjson` report files in `LOG_DIR` that are older than this threshold.
+
+---
+
+### Step 5 — Output format *(optional, default: human)*
+
+**What it asks:** Choose between `human` (formatted dashboard) or `raw` (NDJSON passthrough).
+
+**What it accomplishes:** Sets `OUTPUT_FORMAT`.
+- `human` — bscan parses the NDJSON stream and renders a structured report with findings, metrics, and an alert banner.
+- `raw` — the NDJSON stream from bumblebee is passed through directly, suitable for piping into other tools.
+
+---
+
+### Step 6 — Auto-export report *(optional, default: yes)*
+
+**What it asks:** Whether to automatically save a timestamped report file to `LOG_DIR` after each scan.
+
+**What it accomplishes:** Sets `EXPORT_REPORT`. When enabled, each scan writes a file named `YYYY_MM_DD_HHmmss_bumblebee_report.txt` (human format) or `.ndjson` (raw format).
+
+---
+
+### Step 7 — Check for bscan updates *(optional, default: yes)*
+
+**What it asks:** Whether to check for bscan script updates before each run.
+
+**What it accomplishes:** Sets `SYNC_BSCAN_REPO`. When enabled, bscan fetches from its remote before each run and, if the local checkout is behind, reports how many commits and offers to `pull --ff-only`. If you accept, bscan updates itself and exits so you can re-run the latest version. The check is skipped silently if the remote is unreachable or no upstream branch exists.
+
+---
+
+### Step 8 — Sync threat catalog *(optional, default: yes)*
+
+**What it asks:** Whether to pull the latest threat signatures before each scan.
+
+**What it accomplishes:** Sets `SYNC_CATALOG`. When enabled, bscan runs `git pull` inside `BUMBLEBEE_DIR` before every scan so the exposure catalog (`threat_intel/`) stays current with the latest published malicious-package advisories.
+
+---
+
+### Step 9 — Install `bscan` command *(optional, default: yes)*
+
+**What it asks:** Whether to install a `bscan` command so the script can be run from anywhere.
+
+**What it accomplishes:** Creates a symlink `bscan → bscan.sh` in the first PATH-visible bin directory found (`~/.local/bin`, `~/bin`, or `/usr/local/bin`), falling back to `~/.local/bin` if none are in PATH yet. If the target directory is not in PATH, bscan prints the exact `export PATH=...` line to add to your shell rc file.
+
+The script resolves symlinks at runtime, so it always finds its own `.env` and repo directory regardless of where it is launched from.
+
+After completing step 9, the wizard saves `.env` and continues to the Configuration Control Panel.
+
+> To re-run the wizard at any time, use option **[0] Reconfigure** in the control panel.
+
+---
+
+## Configuration Control Panel
+
+Shown at the start of every run after the first. Displays all current settings and lets you change any of them before proceeding to a scan.
 
 ```
 =========================================================
        BUMBLEBEE SCANNER CONFIGURATION CONTROL PANEL
 =========================================================
-  [1] Bumblebee Home Dir   : /Users/me/bumblebee
-  [2] System Scan Target   : /Users
+  [1] Bumblebee Home Dir   : /home/user/bumblebee
+  [2] System Scan Target   : /home
   [3] Target Output Format : human
   [4] Auto-Export Report   : yes
-  [5] Log Directory Path   : /Users/me/_scripts/LOGS
+  [5] Log Directory Path   : /home/user/_scripts/LOGS/bscan
   [6] Log Retention Rules  : Delete logs older than 180 days
   [7] Check bscan Updates  : yes
   [8] Sync Threat Catalog  : yes
   [9] Scan Output Mode     : spinner
-  [0] Reset to Defaults
+  [L] bscan Symlink        : /home/user/.local/bin/bscan → …/bscan.sh
+  [0] Reconfigure (delete .env, re-run wizard)
 ---------------------------------------------------------
   [P] PROCEED TO RUN SCAN  |  [Q] QUIT PROGRAM
 =========================================================
 ```
 
+| Option | What it changes |
+|---|---|
+| `[1]` | Bumblebee repo directory (`BUMBLEBEE_DIR`) |
+| `[2]` | Scan root path (`SCAN_ROOT`) — must exist |
+| `[3]` | Output format (`OUTPUT_FORMAT`): `human` or `raw` |
+| `[4]` | Auto-export reports (`EXPORT_REPORT`): `yes` or `no` |
+| `[5]` | Log directory (`LOG_DIR`) |
+| `[6]` | Retention period (`RETENTION_DAYS`) in days |
+| `[7]` | bscan self-update check (`SYNC_BSCAN_REPO`): `yes` or `no` |
+| `[8]` | Threat catalog sync (`SYNC_CATALOG`): `yes` or `no` |
+| `[9]` | Scan output mode (`SCAN_MODE`): `spinner` or `verbose` |
+| `[L]` | Symlink management — install/recreate or remove the `bscan` command |
+| `[0]` | **Reconfigure** — deletes `.env` and re-runs the full setup wizard (double-confirmed) |
+| `[P]` | Proceed to scan |
+| `[Q]` | Quit |
+
+Settings are written to `.env` immediately on change. Press **ENTER** or `P` to proceed to the scan.
+
+### Symlink management `[L]`
+
+Shows the current symlink status (`~/.local/bin/bscan → …/bscan.sh` or `not installed`) and offers two actions:
+1. **Install / recreate** — creates or replaces the symlink in the first PATH-visible bin directory
+2. **Remove** — deletes the symlink from any known location it may have been placed
+
+### Reconfigure `[0]`
+
+Requires two separate confirmations before acting. Once confirmed, deletes `.env` and immediately re-launches the full 9-step wizard so you can start fresh with a clean configuration.
+
 ---
 
 ## Scan Profiles
 
+After leaving the control panel, bscan prompts for a scan profile:
+
 | # | Profile | Description |
 |---|---|---|
-| 1 | `baseline` | Quick global packages/extensions checklist |
-| 2 | `project` | Targeted workspace/lockfile inspection |
-| 3 | `deep` *(default)* | Aggressive cross-user ecosystem sweep |
-| 4 | `incident-response` | Targeted emergency vulnerability triage |
+| 1 | `baseline` | Quick inventory of global packages, editor extensions, and browser extensions |
+| 2 | `project` | Targeted inspection of configured workspace directories and lockfiles |
+| 3 | `deep` *(default)* | Aggressive cross-user sweep of the full `SCAN_ROOT` tree |
+| 4 | `incident-response` | Emergency triage — targeted exposure check for a specific advisory |
 
-> **Note:** When `SCAN_ROOT` is set to `/` (filesystem root), a warning is shown before the confirmation prompt indicating the scan will cover the entire system and may take significantly longer.
->
-> **Tip:** Common values are `/Users` (macOS) or `/home` (Linux) to cover all user directories, or `/` to scan everything. The first-run wizard shows the correct example for your OS automatically.
+> **Tip:** Common `SCAN_ROOT` values are `/Users` (macOS) or `/home` (Linux) to cover all user directories, or `/` to scan the entire system. When `/` is selected, bscan displays a warning before the confirmation prompt.
 
 ---
 
@@ -136,17 +275,31 @@ You can edit `.env` directly or use the **Configuration Control Panel** shown at
 
 ### Spinner (default)
 
-bumblebee runs in the background. A rotating indicator and live elapsed time are shown so you can confirm the scan is still running:
+bumblebee runs in the background. A rotating indicator and live elapsed time confirm the scan is still running:
 
 ```
   [/] Scanning... 23s elapsed
 ```
 
-When the scan completes the line is cleared and the report is rendered.
+When the scan completes the indicator line is cleared and the report is rendered.
 
 ### Verbose
 
-bumblebee's raw output streams live to the terminal as it runs. The output is simultaneously captured to a temp file so the formatted dashboard and report export still work normally after the scan finishes. Select via option `[9]` in the config panel or set `SCAN_MODE=verbose` in `.env`.
+bumblebee's raw NDJSON output streams live to the terminal as it runs. The output is simultaneously captured to a temp file so the formatted report and export still work normally after the scan finishes. Select via option `[9]` in the config panel or set `SCAN_MODE=verbose` in `.env`.
+
+---
+
+## How bumblebee is found at runtime
+
+bscan resolves the bumblebee binary path before each scan using `_find_bumblebee_bin`, which checks five locations in order:
+
+1. System `PATH` (`command -v bumblebee`)
+2. `$GOBIN/bumblebee` (explicit Go bin override)
+3. `$GOPATH/bin/bumblebee` (explicit GOPATH)
+4. `~/go/bin/bumblebee` (default `go install` target)
+5. `$BUMBLEBEE_DIR/bumblebee` (local build inside the repo clone)
+
+The resolved absolute path is passed directly to `sudo "$BUMBLEBEE_BIN" scan …`, so the binary is found even when sudo runs with a restricted `PATH` that strips user-local directories.
 
 ---
 
@@ -159,13 +312,13 @@ bumblebee's raw output streams live to the terminal as it runs. The output is si
                BUMBLEBEE SCAN REPORT
 ========================================================
 Generated : 2026-05-29 12:00:00
-Target    : /Users
+Target    : /home
 Profile   : deep
 Elapsed   : 42s
 --------------------------------------------------------
 ⚠️  MALICIOUS COMPROMISES / FINDINGS DETECTED: (1 found)
 --------------------------------------------------------
-  • [NPM] malicious-pkg (v1.2.3) found at: /Users/me/project/node_modules
+  • [NPM] malicious-pkg (v1.2.3) found at: /home/user/project/node_modules
 
 📊 SCAN PERFORMANCE METRICS:
 --------------------------------------------------------
@@ -183,7 +336,7 @@ If findings are detected, a red alert banner is printed after the report:
 
 ### Raw format
 
-Passes the NDJSON stream from `bumblebee` directly to stdout. Suitable for piping into other tools.
+Passes the NDJSON stream from bumblebee directly to stdout. Suitable for piping into other tools or SIEM ingestion.
 
 ---
 
@@ -202,12 +355,31 @@ Files older than `RETENTION_DAYS` days are automatically purged at the start of 
 
 ## Sync Behaviour
 
-Before scanning, bscan can optionally keep itself and its data current:
+Before each scan, bscan can optionally keep itself and its data current:
 
-- **bscan itself** (`SYNC_BSCAN_REPO=yes`) — fetches from the remote and, if your checkout is behind, reports how many commits and offers to `pull --ff-only`. If you accept, bscan updates and exits so you can re-run the latest version. The check is skipped silently when the remote is unreachable or there's no upstream branch.
-- **Threat catalog** (`SYNC_CATALOG=yes`) — pulls fresh malicious-package signatures from the bumblebee repo
+- **bscan self-update** (`SYNC_BSCAN_REPO=yes`) — fetches from the remote and, if the local checkout is behind, reports how many commits and offers to `pull --ff-only`. If accepted, bscan updates and exits so you re-run the latest version. Skipped silently when the remote is unreachable.
+- **Threat catalog** (`SYNC_CATALOG=yes`) — runs `git pull` inside `BUMBLEBEE_DIR` to fetch the latest malicious-package signatures before the scan.
 
-Both are enabled by default and can be toggled independently via options `[7]` and `[8]` in the config panel.
+Both are enabled by default and toggled independently via options `[7]` and `[8]`.
+
+---
+
+## Configuration Reference
+
+Settings are stored in `.env` (gitignored, auto-generated on first run). A safe template is provided in `.env-sample`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `BUMBLEBEE_DIR` | *(required)* | Path to your local bumblebee clone |
+| `BUMBLEBEE_REPO_URL` | `https://github.com/perplexityai/bumblebee` | Override to use an SSH URL or a fork |
+| `SCAN_ROOT` | *(required)* | Root directory bumblebee will scan recursively |
+| `LOG_DIR` | *(required)* | Directory where report files are written |
+| `OUTPUT_FORMAT` | `human` | `human` = formatted dashboard, `raw` = NDJSON passthrough |
+| `EXPORT_REPORT` | `yes` | Auto-save a report file after each scan |
+| `RETENTION_DAYS` | `180` | Delete report files older than this many days |
+| `SYNC_BSCAN_REPO` | `yes` | Check for bscan updates before each run |
+| `SYNC_CATALOG` | `yes` | Pull latest threat signatures before each run |
+| `SCAN_MODE` | `spinner` | `spinner` = progress indicator, `verbose` = live output stream |
 
 ---
 
