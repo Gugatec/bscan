@@ -27,15 +27,37 @@ Everything else — **Homebrew**, **Go**, and the **bumblebee binary** — is de
 
 ## Installation
 
+### Option A — Download a release (recommended)
+
+Download the latest `bscan.sh` from the [Releases](https://github.com/Gugatec/bscan/releases) page and install it in one step.
+
+**macOS and Linux — one-liner:**
+
 ```bash
-# 1. Clone this repo
+curl -fsSL https://github.com/Gugatec/bscan/releases/latest/download/bscan.sh -o bscan.sh
+chmod +x bscan.sh
+./bscan.sh
+```
+
+**Verify the download (optional but recommended):**
+
+```bash
+# Download the checksum file
+curl -fsSL https://github.com/Gugatec/bscan/releases/latest/download/bscan.sh.sha256 -o bscan.sh.sha256
+
+# Verify (macOS)
+shasum -a 256 -c bscan.sh.sha256
+
+# Verify (Linux)
+sha256sum -c bscan.sh.sha256
+```
+
+### Option B — Clone from source
+
+```bash
 git clone https://github.com/Gugatec/bscan.git
 cd bscan
-
-# 2. Make the script executable
 chmod +x bscan.sh
-
-# 3. Run the first-time setup wizard
 ./bscan.sh
 ```
 
@@ -229,8 +251,8 @@ Shown at the start of every run after the first. Displays all current settings a
   [7] Check bscan Updates  : yes
   [8] Sync Threat Catalog  : yes
   [9] Scan Output Mode     : spinner
-  [L] bscan Symlink        : /home/user/.local/bin/bscan → …/bscan.sh
 
+  [L] bscan Symlink        : /home/user/.local/bin/bscan → …/bscan.sh
   [R] Reconfigure (delete .env, re-run wizard)
   [U] Uninstall
 ---------------------------------------------------------
