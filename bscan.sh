@@ -91,6 +91,76 @@ reconfigure() {
 }
 
 # ---------------------------------------------------------------------------
+# Symlink management
+# ---------------------------------------------------------------------------
+
+_install_symlink() {
+    local _target="$BSCAN_REPO_DIR/bscan.sh"
+    local _bin_dir=""
+    for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+        if [[ ":$PATH:" == *":$_d:"* ]]; then
+            _bin_dir="$_d"; break
+        fi
+    done
+    [[ -z "$_bin_dir" ]] && _bin_dir="$HOME/.local/bin"
+
+    mkdir -p "$_bin_dir"
+    local _link="$_bin_dir/bscan"
+
+    if [[ -L "$_link" || -e "$_link" ]]; then
+        rm -f "$_link"
+    fi
+    ln -s "$_target" "$_link"
+    echo -e "${GREEN}  ✔ Symlink created: ${_link} → ${_target}${RESET}"
+
+    if [[ ":$PATH:" != *":$_bin_dir:"* ]]; then
+        echo -e "${YELLOW}  ⚠  ${_bin_dir} is not in your PATH.${RESET}"
+        echo -e "${DIM}  Add this line to your shell rc file (~/.bashrc, ~/.zshrc, etc.):${RESET}"
+        echo -e "${DIM}    export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+        echo -e "${DIM}  Then open a new terminal or run: source ~/.bashrc${RESET}"
+    fi
+}
+
+_symlink_status() {
+    local _link
+    for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+        _link="$_d/bscan"
+        if [[ -L "$_link" ]]; then
+            echo "$_link → $(readlink "$_link")"
+            return
+        fi
+    done
+    echo "not installed"
+}
+
+_manage_symlink() {
+    local _status
+    _status=$(_symlink_status)
+    echo ""
+    echo -e "  ${BOLD}bscan symlink:${RESET} ${YELLOW}${_status}${RESET}"
+    echo ""
+    echo "    1) Install / recreate symlink"
+    echo "    2) Remove symlink"
+    read -rp "  Choose [1-2] or ENTER to cancel: " _lc
+    case "$_lc" in
+        1) _install_symlink ;;
+        2)
+            local _removed=0
+            for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+                if [[ -L "$_d/bscan" ]]; then
+                    rm -f "$_d/bscan"
+                    echo -e "${GREEN}  ✔ Removed: ${_d}/bscan${RESET}"
+                    _removed=1
+                fi
+            done
+            [[ "$_removed" -eq 0 ]] && echo -e "${DIM}  No symlink found to remove.${RESET}"
+            ;;
+        *) echo -e "${DIM}  Cancelled.${RESET}" ;;
+    esac
+    sleep 1
+}
+
+# ---------------------------------------------------------------------------
 # First-run setup wizard
 # ---------------------------------------------------------------------------
 
@@ -167,10 +237,10 @@ first_run_setup() {
     echo "  ╚═══════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
 
-    # [1/8] Required — loop until bumblebee is confirmed present or cloned
+    # [1/9] Required — loop until bumblebee is confirmed present or cloned
     while true; do
         while true; do
-            echo -e "  ${BOLD}[1/8] Bumblebee home directory${RESET}"
+            echo -e "  ${BOLD}[1/9] Bumblebee home directory${RESET}"
             echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo ($BUMBLEBEE_REPO_URL)${RESET}"
             read -re -p "  > " BUMBLEBEE_DIR
             if [[ -n "$BUMBLEBEE_DIR" ]]; then
@@ -187,9 +257,9 @@ first_run_setup() {
         if _ensure_bumblebee; then break; fi
     done
 
-    # [2/8] Required — no default
+    # [2/9] Required — no default
     while true; do
-        echo -e "  ${BOLD}[2/8] Scan root path${RESET}"
+        echo -e "  ${BOLD}[2/9] Scan root path${RESET}"
         case "$(uname -s)" in
             Linux)  _scan_eg="/home (all user directories), / (entire system)" ;;
             Darwin) _scan_eg="/Users (all user directories), / (entire system)" ;;
@@ -202,9 +272,9 @@ first_run_setup() {
     done
     echo ""
 
-    # [3/8] Required — validate or create directory
+    # [3/9] Required — validate or create directory
     while true; do
-        echo -e "  ${BOLD}[3/8] Log directory${RESET}"
+        echo -e "  ${BOLD}[3/9] Log directory${RESET}"
         echo -e "  ${DIM}Where scan reports will be saved. Will be created if it does not exist.${RESET}"
         read -re -p "  > " LOG_DIR
         if [[ -z "$LOG_DIR" ]]; then
@@ -236,30 +306,30 @@ first_run_setup() {
     done
     echo ""
 
-    _prompt_value "[4/8] Log retention (days)" "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
+    _prompt_value "[4/9] Log retention (days)" "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
 
-    echo -e "  ${BOLD}[5/8] Output format${RESET}  (human = dashboard, raw = NDJSON)"
+    echo -e "  ${BOLD}[5/9] Output format${RESET}  (human = dashboard, raw = NDJSON)"
     echo -e "  ${DIM}[default: human]${RESET}"
     read -re -p "  > " _fmt
     OUTPUT_FORMAT="${_fmt:-human}"
     [[ "$OUTPUT_FORMAT" != "raw" ]] && OUTPUT_FORMAT="human"
     echo ""
 
-    echo -e "  ${BOLD}[6/8] Auto-export report after scan? [yes/no]${RESET}"
+    echo -e "  ${BOLD}[6/9] Auto-export report after scan? [yes/no]${RESET}"
     echo -e "  ${DIM}[default: yes]${RESET}"
     read -re -p "  > " _exp
     _exp=$(echo "${_exp:-yes}" | tr '[:upper:]' '[:lower:]')
     EXPORT_REPORT=$([[ "$_exp" == "no" ]] && echo "no" || echo "yes")
     echo ""
 
-    echo -e "  ${BOLD}[7/8] Check for bscan updates before each run? [yes/no]${RESET}"
+    echo -e "  ${BOLD}[7/9] Check for bscan updates before each run? [yes/no]${RESET}"
     echo -e "  ${DIM}Offers to pull the latest bscan when your checkout is behind. [default: yes]${RESET}"
     read -re -p "  > " _sbr
     _sbr=$(echo "${_sbr:-yes}" | tr '[:upper:]' '[:lower:]')
     SYNC_BSCAN_REPO=$([[ "$_sbr" == "no" ]] && echo "no" || echo "yes")
     echo ""
 
-    echo -e "  ${BOLD}[8/8] Sync threat catalog before each run? [yes/no]${RESET}"
+    echo -e "  ${BOLD}[8/9] Sync threat catalog before each run? [yes/no]${RESET}"
     echo -e "  ${DIM}[default: yes]${RESET}"
     read -re -p "  > " _sc
     _sc=$(echo "${_sc:-yes}" | tr '[:upper:]' '[:lower:]')
@@ -273,37 +343,7 @@ first_run_setup() {
     echo -e "${DIM}  Edit .env directly or use the config panel at any time.${RESET}"
     echo ""
 
-    # --- Install bscan symlink ---
-    _install_symlink() {
-        local _target="$BSCAN_REPO_DIR/bscan.sh"
-        local _bin_dir=""
-        # prefer a dir already in PATH
-        for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
-            if [[ ":$PATH:" == *":$_d:"* ]]; then
-                _bin_dir="$_d"; break
-            fi
-        done
-        # fall back to ~/.local/bin even if not yet in PATH
-        [[ -z "$_bin_dir" ]] && _bin_dir="$HOME/.local/bin"
-
-        mkdir -p "$_bin_dir"
-        local _link="$_bin_dir/bscan"
-
-        if [[ -L "$_link" || -e "$_link" ]]; then
-            rm -f "$_link"
-        fi
-        ln -s "$_target" "$_link"
-        echo -e "${GREEN}  ✔ Symlink created: ${_link} → ${_target}${RESET}"
-
-        if [[ ":$PATH:" != *":$_bin_dir:"* ]]; then
-            echo -e "${YELLOW}  ⚠  ${_bin_dir} is not in your PATH.${RESET}"
-            echo -e "${DIM}  Add this line to your shell rc file (~/.bashrc, ~/.zshrc, etc.):${RESET}"
-            echo -e "${DIM}    export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
-            echo -e "${DIM}  Then open a new terminal or run: source ~/.bashrc${RESET}"
-        fi
-    }
-
-    echo -e "  ${BOLD}Install 'bscan' command? [yes/no]${RESET}"
+    echo -e "  ${BOLD}[9/9] Install 'bscan' command? [yes/no]${RESET}"
     echo -e "  ${DIM}Creates a symlink so you can run 'bscan' from anywhere. [default: yes]${RESET}"
     read -re -p "  > " _inst
     _inst=$(echo "${_inst:-yes}" | tr '[:upper:]' '[:lower:]')
@@ -344,6 +384,7 @@ while true; do
     echo -e "  ${BOLD}[7]${RESET} Check bscan Updates  : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
     echo -e "  ${BOLD}[8]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
     echo -e "  ${BOLD}[9]${RESET} Scan Output Mode     : ${YELLOW}$SCAN_MODE${RESET}"
+    echo -e "  ${BOLD}[L]${RESET} bscan Symlink        : ${YELLOW}$(_symlink_status)${RESET}"
     echo -e "  ${BOLD}[0]${RESET} Reconfigure (delete .env, re-run wizard)"
     echo -e "${CYAN}---------------------------------------------------------${RESET}"
     echo -e "  ${GREEN}${BOLD}[P] PROCEED TO RUN SCAN${RESET}  |  ${RED}[Q] QUIT PROGRAM${RESET}"
@@ -409,6 +450,9 @@ while true; do
             read -rp "Choose mode [1-2]: " mode_val
             if [[ "$mode_val" == "2" ]]; then SCAN_MODE="verbose"; else SCAN_MODE="spinner"; fi
             save_config
+            ;;
+        l)
+            _manage_symlink
             ;;
         0)
             reconfigure
