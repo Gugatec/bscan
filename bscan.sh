@@ -76,6 +76,11 @@ reset_config() {
 # First-run setup wizard
 # ---------------------------------------------------------------------------
 
+_expand_path() {
+    # Expand $VAR and ~ so user-typed paths like $HOME/foo work immediately
+    eval echo "$1"
+}
+
 _prompt_value() {
     local label="$1" default="$2" varname="$3"
     echo -e "  ${BOLD}${label}${RESET}"
@@ -101,7 +106,7 @@ first_run_setup() {
         echo -e "  ${BOLD}[1/8] Bumblebee home directory${RESET}"
         echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo (github.com/SocketDev/socket-bumblebee)${RESET}"
         read -re -p "  > " BUMBLEBEE_DIR
-        if [[ -n "$BUMBLEBEE_DIR" ]]; then break; fi
+        if [[ -n "$BUMBLEBEE_DIR" ]]; then BUMBLEBEE_DIR=$(_expand_path "$BUMBLEBEE_DIR"); break; fi
         echo -e "  ${RED}Path is required.${RESET}\n"
     done
     echo ""
@@ -111,7 +116,7 @@ first_run_setup() {
         echo -e "  ${BOLD}[2/8] Scan root path${RESET}"
         echo -e "  ${DIM}Root directory bumblebee will scan recursively (e.g. / for everything, /Users for all Mac user folders)${RESET}"
         read -re -p "  > " SCAN_ROOT
-        if [[ -n "$SCAN_ROOT" ]]; then break; fi
+        if [[ -n "$SCAN_ROOT" ]]; then SCAN_ROOT=$(_expand_path "$SCAN_ROOT"); break; fi
         echo -e "  ${RED}Path is required.${RESET}\n"
     done
     echo ""
@@ -124,6 +129,7 @@ first_run_setup() {
         if [[ -z "$LOG_DIR" ]]; then
             echo -e "  ${RED}Path is required.${RESET}\n"; continue
         fi
+        LOG_DIR=$(_expand_path "$LOG_DIR")
         if [[ -d "$LOG_DIR" ]]; then
             if [[ -w "$LOG_DIR" ]]; then
                 echo -e "  ${GREEN}✔ Directory exists and is writable.${RESET}"; break
@@ -219,6 +225,7 @@ while true; do
         1)
             read -rp "Enter new Bumblebee Directory Path: " input_val
             if [[ -n "$input_val" ]]; then
+                input_val=$(_expand_path "$input_val")
                 [[ ! -d "$input_val" ]] && echo -e "${YELLOW}Warning: Directory does not exist yet. Saving anyway.${RESET}"
                 BUMBLEBEE_DIR="$input_val"; save_config
             fi
@@ -226,6 +233,7 @@ while true; do
         2)
             read -rp "Enter new System Scan Target Path: " input_val
             if [[ -n "$input_val" ]]; then
+                input_val=$(_expand_path "$input_val")
                 if [[ ! -d "$input_val" ]]; then
                     echo -e "${RED}Error: Target path does not exist: $input_val${RESET}"; sleep 1; continue
                 fi
@@ -247,7 +255,7 @@ while true; do
             ;;
         5)
             read -rp "Enter new Log Directory Path: " input_val
-            if [[ -n "$input_val" ]]; then LOG_DIR="$input_val"; save_config; fi
+            if [[ -n "$input_val" ]]; then LOG_DIR=$(_expand_path "$input_val"); save_config; fi
             ;;
         6)
             read -rp "Enter number of days to retain logs (e.g., 180): " input_val
