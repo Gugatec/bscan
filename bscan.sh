@@ -5,7 +5,7 @@ set -euo pipefail
 # --- ANSI Color Palette ---
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
-BLINK='\033[5m'
+BLINK='\033[5m'; BG_RED='\033[41m'; WHITE='\033[97m'; ORANGE='\033[33m'
 
 # --- Error trap ---
 trap 'echo -e "\n${RED}[ERROR]${RESET} Script failed at line $LINENO. Exit code: $?" >&2' ERR
@@ -87,10 +87,13 @@ _remove_from_rc() {
 _uninstall_step() {
     local _label="$1"
     local _detail="${2:-}"
-    echo ""
-    echo -e "  ${BOLD}$_label${RESET}"
-    [[ -n "$_detail" ]] && echo -e "  ${DIM}  $_detail${RESET}"
-    read -rp "  Remove? [y/N]: " _yn
+    printf "\n" > /dev/tty
+    printf "  \033[1m%s\033[0m\n" "$_label" > /dev/tty
+    if [[ -n "$_detail" ]]; then
+        printf "  \033[2m  %s\033[0m\n" "$_detail" > /dev/tty
+    fi
+    local _yn
+    read -rp "  Remove? [y/N]: " _yn < /dev/tty
     [[ "${_yn:-n}" =~ ^[Yy] ]]
 }
 
@@ -119,10 +122,10 @@ _confirm_destructive() {
         return 1
     fi
 
-    # Gate 4 — flashing red final warning
+    # Gate 4 — flashing warning: red background, text blinks white→orange
     echo ""
-    echo -e "  ${BOLD}${RED}${BLINK}⚠  Are you sure that you want to uninstall ${_name}?${RESET}"
-    echo -e "  ${BOLD}${RED}   This step is not reversible.${RESET}"
+    echo -e "  ${BG_RED}${BOLD}${BLINK}${WHITE}  ⚠  Are you sure that you want to uninstall ${_name}?  ${RESET}"
+    echo -e "  ${BG_RED}${BOLD}${ORANGE}     This step is not reversible.                       ${RESET}"
     echo ""
     read -rp "  Final confirmation — proceed? [y/N]: " _g4
     [[ ! "${_g4:-n}" =~ ^[Yy] ]] && echo -e "  ${DIM}Cancelled.${RESET}" && return 1
