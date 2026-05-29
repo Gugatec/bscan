@@ -322,8 +322,59 @@ _install_go() {
     echo -e "  ${GREEN}✔ GOPATH/bin added to PATH and written to $_rc${RESET}"
 }
 
-_expand_path() {
-    eval echo "$1"
+# Expand shell variables and ~, then anchor relative paths to $HOME.
+_normalize_path() {
+    local _p
+    _p=$(eval echo "$1")
+    [[ "$_p" != /* ]] && _p="$HOME/$_p"
+    echo "$_p"
+}
+
+# Validate a directory: create it if missing, confirm it is writable.
+# Prints status lines. Returns 0 on success, 1 on failure.
+_validate_writable_dir() {
+    local _dir="$1"
+    if [[ -d "$_dir" ]]; then
+        if [[ -w "$_dir" ]]; then
+            echo -e "  ${GREEN}✔ Directory exists and is writable.${RESET}"
+            return 0
+        else
+            echo -e "  ${RED}Directory exists but is not writable: $_dir${RESET}"
+            return 1
+        fi
+    else
+        echo -e "  ${YELLOW}Directory not found. Creating: $_dir${RESET}"
+        if mkdir -p "$_dir" 2>/dev/null && [[ -w "$_dir" ]]; then
+            echo -e "  ${GREEN}✔ Directory created successfully.${RESET}"
+            return 0
+        else
+            echo -e "  ${RED}Could not create or write to: $_dir — check permissions.${RESET}"
+            return 1
+        fi
+    fi
+}
+
+# Interactive log-directory prompt: normalize, offer /bscan append,
+# validate/create, check writable. Writes result into LOG_DIR.
+# Used by both the setup wizard and the menu.
+_set_log_dir() {
+    while true; do
+        read -re -p "  > " _raw_log
+        if [[ -z "$_raw_log" ]]; then
+            echo -e "  ${RED}Path is required.${RESET}\n"; continue
+        fi
+        LOG_DIR=$(_normalize_path "$_raw_log")
+        if [[ "$(basename "$LOG_DIR")" != "bscan" ]]; then
+            read -rp "  Append '/bscan' to path? [Y/n]: " _app
+            _app=$(echo "${_app:-y}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$_app" != "n" && "$_app" != "no" ]]; then
+                LOG_DIR="${LOG_DIR%/}/bscan"
+                echo -e "  ${DIM}Path adjusted to: $LOG_DIR${RESET}"
+            fi
+        fi
+        _validate_writable_dir "$LOG_DIR" && break
+        echo ""
+    done
 }
 
 _ensure_bumblebee() {
@@ -341,7 +392,7 @@ _ensure_bumblebee() {
             echo -e "  ${DIM}Install location [default: $BUMBLEBEE_DIR — press ENTER to confirm]:${RESET}"
             read -re -p "  > " _clone_dest
             if [[ -n "$_clone_dest" ]]; then
-                BUMBLEBEE_DIR=$(_expand_path "$_clone_dest")
+                BUMBLEBEE_DIR=$(_normalize_path "$_clone_dest")
             fi
 
             echo ""
@@ -453,7 +504,7 @@ first_run_setup() {
             echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo ($BUMBLEBEE_REPO_URL)${RESET}"
             read -re -p "  > " BUMBLEBEE_DIR
             if [[ -n "$BUMBLEBEE_DIR" ]]; then
-                BUMBLEBEE_DIR=$(_expand_path "$BUMBLEBEE_DIR")
+                BUMBLEBEE_DIR=$(_normalize_path "$BUMBLEBEE_DIR")
                 if [[ "$(basename "$BUMBLEBEE_DIR")" != "bumblebee" ]]; then
                     BUMBLEBEE_DIR="${BUMBLEBEE_DIR%/}/bumblebee"
                     echo -e "  ${DIM}Path adjusted to: $BUMBLEBEE_DIR${RESET}"
@@ -476,43 +527,16 @@ first_run_setup() {
         esac
         echo -e "  ${DIM}Root directory bumblebee will scan recursively (e.g. ${_scan_eg})${RESET}"
         read -re -p "  > " SCAN_ROOT
-        if [[ -n "$SCAN_ROOT" ]]; then SCAN_ROOT=$(_expand_path "$SCAN_ROOT"); break; fi
+        if [[ -n "$SCAN_ROOT" ]]; then SCAN_ROOT=$(_normalize_path "$SCAN_ROOT"); break; fi
         echo -e "  ${RED}Path is required.${RESET}\n"
     done
     echo ""
 
     # [3/9] Required — validate or create directory
-    while true; do
-        echo -e "  ${BOLD}[3/9] Log directory${RESET}"
-        echo -e "  ${DIM}Where scan reports will be saved. Will be created if it does not exist.${RESET}"
-        read -re -p "  > " LOG_DIR
-        if [[ -z "$LOG_DIR" ]]; then
-            echo -e "  ${RED}Path is required.${RESET}\n"; continue
-        fi
-        LOG_DIR=$(_expand_path "$LOG_DIR")
-        if [[ "$(basename "$LOG_DIR")" != "bscan" ]]; then
-            read -rp "  Append '/bscan' to path? [Y/n]: " _app
-            _app=$(echo "${_app:-y}" | tr '[:upper:]' '[:lower:]')
-            if [[ "$_app" != "n" && "$_app" != "no" ]]; then
-                LOG_DIR="${LOG_DIR%/}/bscan"
-                echo -e "  ${DIM}Path adjusted to: $LOG_DIR${RESET}"
-            fi
-        fi
-        if [[ -d "$LOG_DIR" ]]; then
-            if [[ -w "$LOG_DIR" ]]; then
-                echo -e "  ${GREEN}✔ Directory exists and is writable.${RESET}"; break
-            else
-                echo -e "  ${RED}Directory exists but is not writable: $LOG_DIR${RESET}\n"; continue
-            fi
-        else
-            echo -e "  ${YELLOW}Directory not found. Creating: $LOG_DIR${RESET}"
-            if mkdir -p "$LOG_DIR" 2>/dev/null && [[ -w "$LOG_DIR" ]]; then
-                echo -e "  ${GREEN}✔ Directory created successfully.${RESET}"; break
-            else
-                echo -e "  ${RED}Could not create or write to: $LOG_DIR — check the path and permissions.${RESET}\n"; continue
-            fi
-        fi
-    done
+    echo -e "  ${BOLD}[3/9] Log directory${RESET}"
+    echo -e "  ${DIM}Where scan reports will be saved. Will be created if it does not exist.${RESET}"
+    echo -e "  ${DIM}Relative paths are anchored to \$HOME automatically.${RESET}"
+    _set_log_dir
     echo ""
 
     _prompt_value "[4/9] Log retention (days)" "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
@@ -606,7 +630,11 @@ while true; do
         1)
             read -rp "Enter new Bumblebee Directory Path: " input_val
             if [[ -n "$input_val" ]]; then
-                input_val=$(_expand_path "$input_val")
+                input_val=$(_normalize_path "$input_val")
+                if [[ "$(basename "$input_val")" != "bumblebee" ]]; then
+                    input_val="${input_val%/}/bumblebee"
+                    echo -e "${DIM}Path adjusted to: $input_val${RESET}"
+                fi
                 [[ ! -d "$input_val" ]] && echo -e "${YELLOW}Warning: Directory does not exist yet. Saving anyway.${RESET}"
                 BUMBLEBEE_DIR="$input_val"; save_config
             fi
@@ -614,7 +642,7 @@ while true; do
         2)
             read -rp "Enter new System Scan Target Path: " input_val
             if [[ -n "$input_val" ]]; then
-                input_val=$(_expand_path "$input_val")
+                input_val=$(_normalize_path "$input_val")
                 if [[ ! -d "$input_val" ]]; then
                     echo -e "${RED}Error: Target path does not exist: $input_val${RESET}"; sleep 1; continue
                 fi
@@ -635,8 +663,9 @@ while true; do
             if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then EXPORT_REPORT="$input_val"; save_config; fi
             ;;
         5)
-            read -rp "Enter new Log Directory Path: " input_val
-            if [[ -n "$input_val" ]]; then LOG_DIR=$(_expand_path "$input_val"); save_config; fi
+            echo -e "  ${DIM}Relative paths are anchored to \$HOME automatically.${RESET}"
+            _set_log_dir
+            save_config
             ;;
         6)
             read -rp "Enter number of days to retain logs (e.g., 180): " input_val
