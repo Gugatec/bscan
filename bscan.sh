@@ -1125,12 +1125,38 @@ if [[ "$SYNC_BSCAN_REPO" == "yes" ]]; then
                 read -rp "  Update now? [Y/n]: " _upd_yn
                 _upd_yn=$(echo "${_upd_yn:-y}" | tr '[:upper:]' '[:lower:]')
                 if [[ "$_upd_yn" == "y" || "$_upd_yn" == "yes" ]]; then
-                    if git -C "$BSCAN_REPO_DIR" pull --ff-only; then
-                        echo -e "${GREEN}  ✔ bscan updated. Re-run to use the latest version.${RESET}"
-                        exit 0
-                    else
-                        echo -e "${RED}  Update failed (local changes?). Resolve manually with: git -C \"$BSCAN_REPO_DIR\" pull${RESET}"
-                    fi
+                    # Detach the update: bscan cannot safely replace its own
+                    # running file. Write a script to /tmp, exit, let it pull.
+                    _update_script="/tmp/bscan_update_$$.sh"
+                    cat > "$_update_script" << UPDATESCRIPT
+#!/usr/bin/env bash
+sleep 1
+echo ""
+echo "==> Updating bscan..."
+# Stash any local changes so the pull cannot be blocked
+git -C "$BSCAN_REPO_DIR" stash --include-untracked 2>/dev/null || true
+if git -C "$BSCAN_REPO_DIR" pull --ff-only; then
+    git -C "$BSCAN_REPO_DIR" stash drop 2>/dev/null || true
+    echo "✔ bscan updated successfully."
+    echo "  Re-run bscan to use the latest version."
+else
+    echo "Update failed. Run manually:"
+    echo "  git -C \"$BSCAN_REPO_DIR\" stash && git -C \"$BSCAN_REPO_DIR\" pull"
+fi
+rm -f "$_update_script"
+UPDATESCRIPT
+                    chmod +x "$_update_script"
+                    echo ""
+                    echo -e "${YELLOW}${BOLD}  ⚠  Why bscan is exiting now:${RESET}"
+                    echo -e "${DIM}  A running script cannot safely replace its own file.${RESET}"
+                    echo -e "${DIM}  bscan will exit so the update script can pull the latest${RESET}"
+                    echo -e "${DIM}  version cleanly, without the risk of running half-updated code.${RESET}"
+                    echo ""
+                    echo -e "${CYAN}  The update is running in the background...${RESET}"
+                    echo -e "${GREEN}  Re-run bscan once you see '✔ bscan updated successfully.' above.${RESET}"
+                    echo ""
+                    bash "$_update_script" &
+                    exit 0
                 else
                     echo -e "${DIM}  Skipped update.${RESET}"
                 fi
