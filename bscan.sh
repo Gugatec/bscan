@@ -249,6 +249,7 @@ first_run_setup() {
     SYNC_CATALOG=$([[ "$_sc" == "no" ]] && echo "no" || echo "yes")
     echo ""
 
+    SCAN_MODE="${SCAN_MODE:-$DEFAULT_SCAN_MODE}"
     save_config
 
     echo -e "${GREEN}${BOLD}  ✔ Configuration saved to: ${ENV_FILE}${RESET}"
