@@ -91,15 +91,57 @@ first_run_setup() {
     echo "  ╔═══════════════════════════════════════════════════════╗"
     echo "  ║           BSCAN — FIRST RUN SETUP WIZARD             ║"
     echo "  ╠═══════════════════════════════════════════════════════╣"
-    echo "  ║  No .env file found. Let's configure your settings.  ║"
-    echo "  ║  Press ENTER to accept the default for each value.   ║"
+    echo "  ║  No .env found. Let's configure your environment.    ║"
+    echo "  ║  Required fields are marked — others have defaults.  ║"
     echo "  ╚═══════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
 
-    _prompt_value "[1/8] Bumblebee home directory" "$DEFAULT_BUMBLEBEE_DIR" BUMBLEBEE_DIR
-    _prompt_value "[2/8] System scan root path"    "$DEFAULT_SCAN_ROOT"     SCAN_ROOT
-    _prompt_value "[3/8] Log directory"            "$DEFAULT_LOG_DIR"       LOG_DIR
-    _prompt_value "[4/8] Log retention (days)"     "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
+    # [1/8] Required — no default
+    while true; do
+        echo -e "  ${BOLD}[1/8] Bumblebee home directory${RESET}"
+        echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo (github.com/SocketDev/socket-bumblebee)${RESET}"
+        read -re -p "  > " BUMBLEBEE_DIR
+        if [[ -n "$BUMBLEBEE_DIR" ]]; then break; fi
+        echo -e "  ${RED}Path is required.${RESET}\n"
+    done
+    echo ""
+
+    # [2/8] Required — no default
+    while true; do
+        echo -e "  ${BOLD}[2/8] Scan root path${RESET}"
+        echo -e "  ${DIM}Root directory bumblebee will scan recursively (e.g. / for everything, /Users for all Mac user folders)${RESET}"
+        read -re -p "  > " SCAN_ROOT
+        if [[ -n "$SCAN_ROOT" ]]; then break; fi
+        echo -e "  ${RED}Path is required.${RESET}\n"
+    done
+    echo ""
+
+    # [3/8] Required — validate or create directory
+    while true; do
+        echo -e "  ${BOLD}[3/8] Log directory${RESET}"
+        echo -e "  ${DIM}Where scan reports will be saved. Will be created if it does not exist.${RESET}"
+        read -re -p "  > " LOG_DIR
+        if [[ -z "$LOG_DIR" ]]; then
+            echo -e "  ${RED}Path is required.${RESET}\n"; continue
+        fi
+        if [[ -d "$LOG_DIR" ]]; then
+            if [[ -w "$LOG_DIR" ]]; then
+                echo -e "  ${GREEN}✔ Directory exists and is writable.${RESET}"; break
+            else
+                echo -e "  ${RED}Directory exists but is not writable: $LOG_DIR${RESET}\n"; continue
+            fi
+        else
+            echo -e "  ${YELLOW}Directory not found. Creating: $LOG_DIR${RESET}"
+            if mkdir -p "$LOG_DIR" 2>/dev/null && [[ -w "$LOG_DIR" ]]; then
+                echo -e "  ${GREEN}✔ Directory created successfully.${RESET}"; break
+            else
+                echo -e "  ${RED}Could not create or write to: $LOG_DIR — check the path and permissions.${RESET}\n"; continue
+            fi
+        fi
+    done
+    echo ""
+
+    _prompt_value "[4/8] Log retention (days)" "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
 
     echo -e "  ${BOLD}[5/8] Output format${RESET}  (human = dashboard, raw = NDJSON)"
     echo -e "  ${DIM}[default: human]${RESET}"
