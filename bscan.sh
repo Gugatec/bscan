@@ -165,31 +165,106 @@ _manage_symlink() {
 # ---------------------------------------------------------------------------
 
 _find_bumblebee_bin() {
-    # 1. Already in PATH
     if command -v bumblebee &>/dev/null; then
         command -v bumblebee; return 0
     fi
-    # 2. $GOBIN (explicit override)
     if [[ -n "${GOBIN:-}" && -x "$GOBIN/bumblebee" ]]; then
         echo "$GOBIN/bumblebee"; return 0
     fi
-    # 3. $GOPATH/bin (explicit GOPATH)
     if [[ -n "${GOPATH:-}" && -x "$GOPATH/bin/bumblebee" ]]; then
         echo "$GOPATH/bin/bumblebee"; return 0
     fi
-    # 4. Default Go install location ($HOME/go/bin)
     if [[ -x "$HOME/go/bin/bumblebee" ]]; then
         echo "$HOME/go/bin/bumblebee"; return 0
     fi
-    # 5. Binary built locally inside the repo clone
     if [[ -n "${BUMBLEBEE_DIR:-}" && -x "$BUMBLEBEE_DIR/bumblebee" ]]; then
         echo "$BUMBLEBEE_DIR/bumblebee"; return 0
     fi
     return 1
 }
 
+# Detect the user's shell rc file (zshrc preferred, bashrc fallback)
+_shell_rc() {
+    case "${SHELL:-}" in
+        */zsh)  echo "$HOME/.zshrc" ;;
+        */bash) echo "$HOME/.bashrc" ;;
+        *)
+            # fall back: prefer whichever exists, else .bashrc
+            if [[ -f "$HOME/.zshrc" ]]; then echo "$HOME/.zshrc"
+            else echo "$HOME/.bashrc"; fi
+            ;;
+    esac
+}
+
+# Append a line to a file only if it is not already present
+_append_if_missing() {
+    local file="$1" line="$2"
+    if ! grep -qF "$line" "$file" 2>/dev/null; then
+        echo "$line" >> "$file"
+        echo -e "  ${DIM}  Added to $file: $line${RESET}"
+    else
+        echo -e "  ${DIM}  Already present in $file — skipped.${RESET}"
+    fi
+}
+
+# Install Homebrew and wire it into the shell rc
+_install_homebrew() {
+    echo -e "  ${CYAN}Installing Homebrew...${RESET}"
+    if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+        echo -e "  ${RED}Homebrew installation failed.${RESET}"
+        return 1
+    fi
+
+    # Determine brew prefix and the shellenv eval line
+    local _brew_prefix _shellenv_line _rc
+    if [[ -x "/opt/homebrew/bin/brew" ]]; then
+        _brew_prefix="/opt/homebrew"
+    elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+        _brew_prefix="/home/linuxbrew/.linuxbrew"
+    elif [[ -x "/usr/local/bin/brew" ]]; then
+        _brew_prefix="/usr/local"
+    else
+        echo -e "  ${RED}Could not locate brew binary after install.${RESET}"
+        return 1
+    fi
+
+    _shellenv_line="eval \"\$(${_brew_prefix}/bin/brew shellenv)\""
+    _rc=$(_shell_rc)
+    touch "$_rc"
+    _append_if_missing "$_rc" "$_shellenv_line"
+
+    # Activate for the current session
+    eval "$("${_brew_prefix}/bin/brew" shellenv)"
+    echo -e "  ${GREEN}✔ Homebrew installed and configured: $_brew_prefix${RESET}"
+}
+
+# Install Go via Homebrew and wire GOPATH/bin into the shell rc
+_install_go() {
+    if ! command -v brew &>/dev/null; then
+        echo -e "  ${RED}Homebrew not found — cannot install Go automatically.${RESET}"
+        return 1
+    fi
+    echo -e "  ${CYAN}Installing Go via Homebrew...${RESET}"
+    if ! brew install go; then
+        echo -e "  ${RED}Go installation failed.${RESET}"
+        return 1
+    fi
+
+    # Reload brew-managed shell env so 'go' is visible now
+    eval "$(brew shellenv)"
+
+    local _gopath_bin _rc
+    _gopath_bin="$(go env GOPATH)/bin"
+    _rc=$(_shell_rc)
+    touch "$_rc"
+    _append_if_missing "$_rc" "export PATH=\"${_gopath_bin}:\$PATH\""
+
+    export PATH="${_gopath_bin}:$PATH"
+    echo -e "  ${GREEN}✔ Go installed: $(go version)${RESET}"
+    echo -e "  ${GREEN}✔ GOPATH/bin added to PATH and written to $_rc${RESET}"
+}
+
 _expand_path() {
-    # Expand $VAR and ~ so user-typed paths like $HOME/foo work immediately
     eval echo "$1"
 }
 
@@ -230,40 +305,63 @@ _ensure_bumblebee() {
         fi
     fi
 
+    # --- Ensure Go is available, installing Homebrew + Go if needed ---
     echo ""
+    if ! command -v go &>/dev/null; then
+        echo -e "  ${YELLOW}⚠  Go is not installed — required to install the bumblebee CLI.${RESET}"
+        echo ""
+        echo -e "  ${BOLD}  Install Go automatically? (Homebrew will be installed first if needed) [Y/n]${RESET}"
+        read -rp "  > " _inst_go
+        _inst_go=$(echo "${_inst_go:-y}" | tr '[:upper:]' '[:lower:]')
+        if [[ "$_inst_go" == "y" || "$_inst_go" == "yes" ]]; then
+            echo ""
+            if ! command -v brew &>/dev/null; then
+                echo -e "  ${YELLOW}Homebrew not found — installing it first.${RESET}"
+                echo ""
+                _install_homebrew || return 1
+                echo ""
+            fi
+            _install_go || return 1
+        else
+            echo -e "  ${DIM}  Skipped. Install Go manually: https://go.dev/dl/${RESET}"
+            echo -e "  ${DIM}  Then run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+            echo ""
+            return 0
+        fi
+    fi
+
+    # --- Install bumblebee CLI via go install if not already present ---
     local _bb_bin
     if _bb_bin=$(_find_bumblebee_bin); then
         echo -e "  ${GREEN}✔ Bumblebee CLI available: $_bb_bin${RESET}"
     else
         echo -e "  ${YELLOW}⚠  Bumblebee CLI not found.${RESET}"
         echo ""
-        if ! command -v go &>/dev/null; then
-            echo -e "  ${RED}Go is not installed — cannot auto-install bumblebee.${RESET}"
-            echo -e "  ${DIM}  Install Go first: https://go.dev/dl/${RESET}"
-            echo -e "  ${DIM}  Then run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
-        else
-            echo -e "  ${BOLD}  Install bumblebee CLI via 'go install'? [Y/n]${RESET}"
-            echo -e "  ${DIM}  go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
-            read -rp "  > " _go_inst
-            _go_inst=$(echo "${_go_inst:-y}" | tr '[:upper:]' '[:lower:]')
-            if [[ "$_go_inst" == "y" || "$_go_inst" == "yes" ]]; then
-                echo ""
-                echo -e "  ${CYAN}Installing bumblebee...${RESET}"
-                if go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest; then
-                    if _bb_bin=$(_find_bumblebee_bin); then
-                        echo -e "  ${GREEN}✔ Bumblebee CLI installed: $_bb_bin${RESET}"
-                    else
-                        echo -e "  ${YELLOW}⚠  Installed but still not found — ensure Go's bin dir is in PATH.${RESET}"
-                        echo -e "  ${DIM}  Add to your shell rc: export PATH=\"\$(go env GOPATH)/bin:\$PATH\"${RESET}"
-                    fi
+        echo -e "  ${BOLD}  Install bumblebee CLI via 'go install'? [Y/n]${RESET}"
+        echo -e "  ${DIM}  go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+        read -rp "  > " _go_inst
+        _go_inst=$(echo "${_go_inst:-y}" | tr '[:upper:]' '[:lower:]')
+        if [[ "$_go_inst" == "y" || "$_go_inst" == "yes" ]]; then
+            echo ""
+            echo -e "  ${CYAN}Installing bumblebee...${RESET}"
+            local _gopath_bin _rc
+            _gopath_bin="$(go env GOPATH)/bin"
+            _rc=$(_shell_rc)
+            if go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest; then
+                export PATH="${_gopath_bin}:$PATH"
+                touch "$_rc"
+                _append_if_missing "$_rc" "export PATH=\"${_gopath_bin}:\$PATH\""
+                if _bb_bin=$(_find_bumblebee_bin); then
+                    echo -e "  ${GREEN}✔ Bumblebee CLI installed: $_bb_bin${RESET}"
                 else
-                    echo -e "  ${RED}Installation failed. Install manually:${RESET}"
-                    echo -e "  ${DIM}  go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+                    echo -e "  ${YELLOW}⚠  Installed but binary not found yet — open a new terminal and re-run.${RESET}"
                 fi
             else
-                echo -e "  ${DIM}  Skipped. Install manually before running scans:${RESET}"
+                echo -e "  ${RED}Installation failed. Try manually:${RESET}"
                 echo -e "  ${DIM}  go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
             fi
+        else
+            echo -e "  ${DIM}  Skipped. Install manually: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
         fi
     fi
     echo ""
