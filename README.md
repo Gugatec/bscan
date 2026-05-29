@@ -405,7 +405,7 @@ When the scan completes the indicator line is cleared and the report is rendered
 
 ### Verbose
 
-bumblebee's raw NDJSON output streams live to the terminal as it runs. The output is simultaneously captured to a temp file so the formatted report and export still work normally after the scan finishes. Select via option `[9]` in the config panel or set `SCAN_MODE=verbose` in `.env`.
+bumblebee's raw NDJSON output streams live to the terminal as it runs. The output is simultaneously captured to a temp file so the formatted report and export still work normally after the scan finishes. Select via option `[6]` in the config panel or set `SCAN_MODE=verbose` in `.env`.
 
 ---
 
@@ -480,7 +480,7 @@ Before each scan, bscan can optionally keep itself and its data current:
 - **bscan self-update** (`SYNC_BSCAN_REPO=yes`) — fetches from the remote and, if the local checkout is behind, reports how many commits and offers to `pull --ff-only`. If accepted, bscan updates and exits so you re-run the latest version. Skipped silently when the remote is unreachable.
 - **Threat catalog** (`SYNC_CATALOG=yes`) — runs `git pull` inside `BUMBLEBEE_DIR` to fetch the latest malicious-package signatures before the scan.
 
-Both are enabled by default and toggled independently via options `[7]` and `[8]`.
+Both are enabled by default and toggled independently via options `[1]` (Auto-Update) and `[9]` (Sync Threat Catalog) in the control panel.
 
 ---
 
@@ -507,11 +507,12 @@ Settings are stored in `.env` (gitignored, auto-generated on first run). A safe 
 
 ```
 bscan/
-├── bscan.sh          # Main script
-├── .env              # Your local config (gitignored, auto-generated on first run)
-├── .env-sample       # Safe config template (committed)
-├── .gitignore        # Excludes .env
-└── README.md         # This file
+├── bscan.sh           # Main script
+├── bscan.sh.sha256    # SHA256 checksum for release verification
+├── .env               # Your local config (gitignored, auto-generated on first run)
+├── .env-sample        # Safe config template (committed)
+├── .gitignore         # Excludes .env and local session files
+└── README.md          # This file
 ```
 
 ---
