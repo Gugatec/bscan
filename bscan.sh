@@ -25,6 +25,7 @@ DEFAULT_LOG_DIR="$HOME/_scripts/LOGS"
 DEFAULT_RETENTION_DAYS="180"
 DEFAULT_SYNC_BSCAN_REPO="yes"
 DEFAULT_SYNC_CATALOG="yes"
+DEFAULT_SCAN_MODE="spinner"
 
 # ---------------------------------------------------------------------------
 # Config I/O
@@ -43,6 +44,7 @@ load_config() {
     RETENTION_DAYS="${RETENTION_DAYS:-$DEFAULT_RETENTION_DAYS}"
     SYNC_BSCAN_REPO="${SYNC_BSCAN_REPO:-$DEFAULT_SYNC_BSCAN_REPO}"
     SYNC_CATALOG="${SYNC_CATALOG:-$DEFAULT_SYNC_CATALOG}"
+    SCAN_MODE="${SCAN_MODE:-$DEFAULT_SCAN_MODE}"
 }
 
 save_config() {
@@ -56,6 +58,7 @@ LOG_DIR="$LOG_DIR"
 RETENTION_DAYS="$RETENTION_DAYS"
 SYNC_BSCAN_REPO="$SYNC_BSCAN_REPO"
 SYNC_CATALOG="$SYNC_CATALOG"
+SCAN_MODE="$SCAN_MODE"
 EOF
 }
 
@@ -68,6 +71,7 @@ reset_config() {
     RETENTION_DAYS="$DEFAULT_RETENTION_DAYS"
     SYNC_BSCAN_REPO="$DEFAULT_SYNC_BSCAN_REPO"
     SYNC_CATALOG="$DEFAULT_SYNC_CATALOG"
+    SCAN_MODE="$DEFAULT_SCAN_MODE"
     save_config
     echo -e "${GREEN}Configuration reset to defaults.${RESET}"
     sleep 1
@@ -214,7 +218,8 @@ while true; do
     echo -e "  ${BOLD}[6]${RESET} Log Retention Rules  : Delete logs older than ${YELLOW}$RETENTION_DAYS${RESET} days"
     echo -e "  ${BOLD}[7]${RESET} Sync bscan Repo      : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
     echo -e "  ${BOLD}[8]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
-    echo -e "  ${BOLD}[9]${RESET} Reset to Defaults"
+    echo -e "  ${BOLD}[9]${RESET} Scan Output Mode     : ${YELLOW}$SCAN_MODE${RESET}"
+    echo -e "  ${BOLD}[0]${RESET} Reset to Defaults"
     echo -e "${CYAN}---------------------------------------------------------${RESET}"
     echo -e "  ${GREEN}${BOLD}[P] PROCEED TO RUN SCAN${RESET}  |  ${RED}[Q] QUIT PROGRAM${RESET}"
     echo -e "${CYAN}=========================================================${RESET}"
@@ -273,6 +278,14 @@ while true; do
             if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then SYNC_CATALOG="$input_val"; save_config; fi
             ;;
         9)
+            echo "  Select Scan Output Mode:"
+            echo "    1) spinner  (Rotating indicator + elapsed time)"
+            echo "    2) verbose  (Live raw output from bumblebee)"
+            read -rp "Choose mode [1-2]: " mode_val
+            if [[ "$mode_val" == "2" ]]; then SCAN_MODE="verbose"; else SCAN_MODE="spinner"; fi
+            save_config
+            ;;
+        0)
             read -rp "Reset all settings to defaults? [y/N]: " confirm_reset
             confirm_reset=$(echo "$confirm_reset" | tr '[:upper:]' '[:lower:]')
             if [[ "$confirm_reset" == "y" || "$confirm_reset" == "yes" ]]; then reset_config; fi
@@ -315,6 +328,12 @@ esac
 
 echo ""
 echo -e "Selected Profile: ${YELLOW}${BOLD}$SCAN_PROFILE${RESET}"
+
+if [[ "$SCAN_ROOT" == "/" ]]; then
+    echo -e "${YELLOW}${BOLD}⚠  Warning:${RESET}${YELLOW} Scan root is / (filesystem root). This will scan every file on the system and may take a very long time.${RESET}"
+    echo ""
+fi
+
 read -rp "Confirm launching '$SCAN_PROFILE' scan on '$SCAN_ROOT'? [Y/n]: " final_confirm
 final_confirm=$(echo "$final_confirm" | tr '[:upper:]' '[:lower:]')
 
@@ -382,21 +401,30 @@ echo -e "${CYAN}==> Launching ${BOLD}$SCAN_PROFILE${RESET}${CYAN} sweep on ${BOL
 echo ""
 
 SCAN_TMPFILE=$(mktemp)
-sudo bumblebee scan \
-  --profile "$SCAN_PROFILE" \
-  --root "$SCAN_ROOT" \
-  --exposure-catalog "$CATALOG_PATH" > "$SCAN_TMPFILE" 2>&1 &
-SCAN_PID=$!
 
-_spinner "$SCAN_PID"
+if [[ "$SCAN_MODE" == "verbose" ]]; then
+    set +e
+    sudo bumblebee scan \
+      --profile "$SCAN_PROFILE" \
+      --root "$SCAN_ROOT" \
+      --exposure-catalog "$CATALOG_PATH" 2>&1 | tee "$SCAN_TMPFILE"
+    SCAN_EXIT="${PIPESTATUS[0]}"
+    set -e
+else
+    sudo bumblebee scan \
+      --profile "$SCAN_PROFILE" \
+      --root "$SCAN_ROOT" \
+      --exposure-catalog "$CATALOG_PATH" > "$SCAN_TMPFILE" 2>&1 &
+    SCAN_PID=$!
+    _spinner "$SCAN_PID"
+    wait "$SCAN_PID" && SCAN_EXIT=0 || SCAN_EXIT=$?
+fi
 
-wait "$SCAN_PID" && SCAN_EXIT=0 || SCAN_EXIT=$?
 RAW_OUTPUT=$(cat "$SCAN_TMPFILE")
-rm -f "$SCAN_TMPFILE"
 
 if [[ "$SCAN_EXIT" -ne 0 ]]; then
     echo -e "${RED}ERROR: Scan exited with code $SCAN_EXIT${RESET}"
-    echo "$RAW_OUTPUT" >&2
+    [[ "$SCAN_MODE" != "verbose" ]] && echo "$RAW_OUTPUT" >&2
     exit "$SCAN_EXIT"
 fi
 
