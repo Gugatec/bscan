@@ -28,11 +28,11 @@ cd bscan
 # 2. Make the script executable
 chmod +x bscan.sh
 
-# 3. (Optional) Add a convenience symlink
-ln -s "$(pwd)/bscan.sh" ~/.local/bin/bscan
+# 3. Run the first-time setup wizard
+./bscan.sh
 ```
 
-The script resolves symlinks at runtime, so it always finds its own `.env` regardless of where it is launched from.
+The setup wizard will offer to install a `bscan` command (symlink into `~/.local/bin` or `~/bin`) so you can run `bscan` from anywhere. The script resolves symlinks at runtime, so it always finds its own `.env` regardless of where it is launched from.
 
 ---
 
@@ -59,6 +59,7 @@ The first time `bscan.sh` is executed it detects the missing `.env` and launches
 | 2 | Scan root path | **Required.** Re-prompts until a value is entered. |
 | 3 | Log directory | **Required.** Checks if the path exists and is writable; attempts `mkdir -p` if not; re-prompts on failure. |
 | 4–8 | All others | Optional — press **ENTER** to accept the shown default. |
+| — | Install `bscan` command | Offers to create a symlink in `~/.local/bin` (or `~/bin`) so `bscan` is available system-wide. Warns if the target directory is not yet in `PATH`. |
 
 Path inputs accept shell variables (`$HOME`, `$USER`, `~`). They are expanded immediately so the stored value is always an absolute path.
 

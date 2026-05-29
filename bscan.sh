@@ -255,6 +255,46 @@ first_run_setup() {
     echo -e "${GREEN}${BOLD}  ✔ Configuration saved to: ${ENV_FILE}${RESET}"
     echo -e "${DIM}  Edit .env directly or use the config panel at any time.${RESET}"
     echo ""
+
+    # --- Install bscan symlink ---
+    _install_symlink() {
+        local _target="$BSCAN_REPO_DIR/bscan.sh"
+        local _bin_dir=""
+        # prefer a dir already in PATH
+        for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+            if [[ ":$PATH:" == *":$_d:"* ]]; then
+                _bin_dir="$_d"; break
+            fi
+        done
+        # fall back to ~/.local/bin even if not yet in PATH
+        [[ -z "$_bin_dir" ]] && _bin_dir="$HOME/.local/bin"
+
+        mkdir -p "$_bin_dir"
+        local _link="$_bin_dir/bscan"
+
+        if [[ -L "$_link" || -e "$_link" ]]; then
+            rm -f "$_link"
+        fi
+        ln -s "$_target" "$_link"
+        echo -e "${GREEN}  ✔ Symlink created: ${_link} → ${_target}${RESET}"
+
+        if [[ ":$PATH:" != *":$_bin_dir:"* ]]; then
+            echo -e "${YELLOW}  ⚠  ${_bin_dir} is not in your PATH.${RESET}"
+            echo -e "${DIM}  Add this line to your shell rc file (~/.bashrc, ~/.zshrc, etc.):${RESET}"
+            echo -e "${DIM}    export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+            echo -e "${DIM}  Then open a new terminal or run: source ~/.bashrc${RESET}"
+        fi
+    }
+
+    echo -e "  ${BOLD}Install 'bscan' command? [yes/no]${RESET}"
+    echo -e "  ${DIM}Creates a symlink so you can run 'bscan' from anywhere. [default: yes]${RESET}"
+    read -re -p "  > " _inst
+    _inst=$(echo "${_inst:-yes}" | tr '[:upper:]' '[:lower:]')
+    if [[ "$_inst" != "no" ]]; then
+        _install_symlink
+    fi
+    echo ""
+
     read -rp "  Press ENTER to continue to the scanner..."
     echo ""
 }
