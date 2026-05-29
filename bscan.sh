@@ -66,19 +66,28 @@ SCAN_MODE="$SCAN_MODE"
 EOF
 }
 
-reset_config() {
-    BUMBLEBEE_DIR="$DEFAULT_BUMBLEBEE_DIR"
-    SCAN_ROOT="$DEFAULT_SCAN_ROOT"
-    OUTPUT_FORMAT="$DEFAULT_OUTPUT_FORMAT"
-    EXPORT_REPORT="$DEFAULT_EXPORT_REPORT"
-    LOG_DIR="$DEFAULT_LOG_DIR"
-    RETENTION_DAYS="$DEFAULT_RETENTION_DAYS"
-    SYNC_BSCAN_REPO="$DEFAULT_SYNC_BSCAN_REPO"
-    SYNC_CATALOG="$DEFAULT_SYNC_CATALOG"
-    SCAN_MODE="$DEFAULT_SCAN_MODE"
-    save_config
-    echo -e "${GREEN}Configuration reset to defaults.${RESET}"
+reconfigure() {
+    echo ""
+    echo -e "  ${RED}${BOLD}⚠  RECONFIGURE TO DEFAULTS${RESET}"
+    echo -e "  ${DIM}This will DELETE your current .env and re-run the setup wizard.${RESET}"
+    echo -e "  ${DIM}All saved settings will be permanently lost.${RESET}"
+    echo ""
+    read -rp "  Are you sure? This cannot be undone. [y/N]: " _c1
+    _c1=$(echo "$_c1" | tr '[:upper:]' '[:lower:]')
+    if [[ "$_c1" != "y" && "$_c1" != "yes" ]]; then
+        echo -e "  ${DIM}Cancelled.${RESET}"; sleep 1; return
+    fi
+    echo ""
+    read -rp "  Confirm again — delete .env and start over? [y/N]: " _c2
+    _c2=$(echo "$_c2" | tr '[:upper:]' '[:lower:]')
+    if [[ "$_c2" != "y" && "$_c2" != "yes" ]]; then
+        echo -e "  ${DIM}Cancelled.${RESET}"; sleep 1; return
+    fi
+    rm -f "$ENV_FILE"
+    echo -e "${GREEN}  ✔ .env removed. Launching setup wizard...${RESET}"
     sleep 1
+    first_run_setup
+    load_config
 }
 
 # ---------------------------------------------------------------------------
@@ -202,6 +211,14 @@ first_run_setup() {
             echo -e "  ${RED}Path is required.${RESET}\n"; continue
         fi
         LOG_DIR=$(_expand_path "$LOG_DIR")
+        if [[ "$(basename "$LOG_DIR")" != "bscan" ]]; then
+            read -rp "  Append '/bscan' to path? [Y/n]: " _app
+            _app=$(echo "${_app:-y}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$_app" != "n" && "$_app" != "no" ]]; then
+                LOG_DIR="${LOG_DIR%/}/bscan"
+                echo -e "  ${DIM}Path adjusted to: $LOG_DIR${RESET}"
+            fi
+        fi
         if [[ -d "$LOG_DIR" ]]; then
             if [[ -w "$LOG_DIR" ]]; then
                 echo -e "  ${GREEN}✔ Directory exists and is writable.${RESET}"; break
@@ -327,7 +344,7 @@ while true; do
     echo -e "  ${BOLD}[7]${RESET} Check bscan Updates  : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
     echo -e "  ${BOLD}[8]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
     echo -e "  ${BOLD}[9]${RESET} Scan Output Mode     : ${YELLOW}$SCAN_MODE${RESET}"
-    echo -e "  ${BOLD}[0]${RESET} Reset to Defaults"
+    echo -e "  ${BOLD}[0]${RESET} Reconfigure (delete .env, re-run wizard)"
     echo -e "${CYAN}---------------------------------------------------------${RESET}"
     echo -e "  ${GREEN}${BOLD}[P] PROCEED TO RUN SCAN${RESET}  |  ${RED}[Q] QUIT PROGRAM${RESET}"
     echo -e "${CYAN}=========================================================${RESET}"
@@ -394,9 +411,7 @@ while true; do
             save_config
             ;;
         0)
-            read -rp "Reset all settings to defaults? [y/N]: " confirm_reset
-            confirm_reset=$(echo "$confirm_reset" | tr '[:upper:]' '[:lower:]')
-            if [[ "$confirm_reset" == "y" || "$confirm_reset" == "yes" ]]; then reset_config; fi
+            reconfigure
             ;;
         p|"")
             break
@@ -544,6 +559,14 @@ _spinner() {
     printf "\r%-60s\r" ""
 }
 
+BUMBLEBEE_BIN=$(command -v bumblebee 2>/dev/null || true)
+if [[ -z "$BUMBLEBEE_BIN" ]]; then
+    echo -e "${RED}ERROR: 'bumblebee' not found in PATH.${RESET}"
+    echo -e "${DIM}Install it following: $BUMBLEBEE_REPO_URL${RESET}"
+    echo -e "${DIM}Then ensure the install directory is in your PATH and re-run bscan.${RESET}"
+    exit 1
+fi
+
 echo ""
 echo -e "${CYAN}==> Launching ${BOLD}$SCAN_PROFILE${RESET}${CYAN} sweep on ${BOLD}$SCAN_ROOT${RESET}${CYAN}...${RESET}"
 echo ""
@@ -552,14 +575,14 @@ SCAN_TMPFILE=$(mktemp)
 
 if [[ "$SCAN_MODE" == "verbose" ]]; then
     set +e
-    sudo bumblebee scan \
+    sudo "$BUMBLEBEE_BIN" scan \
       --profile "$SCAN_PROFILE" \
       --root "$SCAN_ROOT" \
       --exposure-catalog "$CATALOG_PATH" 2>&1 | tee "$SCAN_TMPFILE"
     SCAN_EXIT="${PIPESTATUS[0]}"
     set -e
 else
-    sudo bumblebee scan \
+    sudo "$BUMBLEBEE_BIN" scan \
       --profile "$SCAN_PROFILE" \
       --root "$SCAN_ROOT" \
       --exposure-catalog "$CATALOG_PATH" > "$SCAN_TMPFILE" 2>&1 &
