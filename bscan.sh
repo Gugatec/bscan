@@ -8,6 +8,7 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 
 # --- Error trap ---
 trap 'echo -e "\n${RED}[ERROR]${RESET} Script failed at line $LINENO. Exit code: $?" >&2' ERR
+trap 'rm -f "${SCAN_TMPFILE:-}"' EXIT
 
 # --- Resolve repo dir even when launched via symlink ---
 _REAL_SCRIPT="$(readlink "$0" 2>/dev/null || echo "$0")"
@@ -365,15 +366,39 @@ fi
 # Scan Execution
 # ---------------------------------------------------------------------------
 
+_spinner() {
+    local pid=$1 frames='-\|/' i=0 secs=0
+    while kill -0 "$pid" 2>/dev/null; do
+        secs=$(( $(date +%s) - SCAN_START ))
+        printf "\r  ${CYAN}[${frames:$i:1}]${RESET} Scanning... %ds elapsed" "$secs"
+        i=$(( (i + 1) % 4 ))
+        sleep 0.15
+    done
+    printf "\r%-60s\r" ""
+}
+
 echo ""
-echo -e "${CYAN}==> Launching ${BOLD}$SCAN_PROFILE${RESET}${CYAN} sweep...${RESET}"
-echo "    [Evaluating local code repositories against signatures...]"
+echo -e "${CYAN}==> Launching ${BOLD}$SCAN_PROFILE${RESET}${CYAN} sweep on ${BOLD}$SCAN_ROOT${RESET}${CYAN}...${RESET}"
 echo ""
 
-RAW_OUTPUT=$(sudo bumblebee scan \
+SCAN_TMPFILE=$(mktemp)
+sudo bumblebee scan \
   --profile "$SCAN_PROFILE" \
   --root "$SCAN_ROOT" \
-  --exposure-catalog "$CATALOG_PATH")
+  --exposure-catalog "$CATALOG_PATH" > "$SCAN_TMPFILE" 2>&1 &
+SCAN_PID=$!
+
+_spinner "$SCAN_PID"
+
+wait "$SCAN_PID" && SCAN_EXIT=0 || SCAN_EXIT=$?
+RAW_OUTPUT=$(cat "$SCAN_TMPFILE")
+rm -f "$SCAN_TMPFILE"
+
+if [[ "$SCAN_EXIT" -ne 0 ]]; then
+    echo -e "${RED}ERROR: Scan exited with code $SCAN_EXIT${RESET}"
+    echo "$RAW_OUTPUT" >&2
+    exit "$SCAN_EXIT"
+fi
 
 SCAN_END=$(date +%s)
 ELAPSED=$(( SCAN_END - SCAN_START ))
