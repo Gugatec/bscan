@@ -207,35 +207,93 @@ _append_if_missing() {
     fi
 }
 
+# Install Linux Homebrew dependencies via the available package manager.
+# Returns 1 and prints instructions if no supported package manager is found.
+_install_brew_linux_deps() {
+    local _pkgs="build-essential procps curl file git"
+    echo -e "  ${CYAN}Installing Homebrew dependencies...${RESET}"
+
+    if command -v apt-get &>/dev/null; then
+        echo -e "  ${DIM}  Detected: apt (Debian / Ubuntu)${RESET}"
+        sudo apt-get update -qq && sudo apt-get install -y build-essential procps curl file git
+    elif command -v dnf &>/dev/null; then
+        echo -e "  ${DIM}  Detected: dnf (Fedora / RHEL 8+)${RESET}"
+        sudo dnf groupinstall -y "Development Tools" && \
+        sudo dnf install -y procps-ng curl file git
+    elif command -v yum &>/dev/null; then
+        echo -e "  ${DIM}  Detected: yum (CentOS / RHEL 7)${RESET}"
+        sudo yum groupinstall -y "Development Tools" && \
+        sudo yum install -y procps-ng curl file git
+    elif command -v zypper &>/dev/null; then
+        echo -e "  ${DIM}  Detected: zypper (openSUSE)${RESET}"
+        sudo zypper install -y gcc make curl file git procps
+    elif command -v pacman &>/dev/null; then
+        echo -e "  ${DIM}  Detected: pacman (Arch)${RESET}"
+        sudo pacman -Sy --noconfirm base-devel curl file git procps-ng
+    else
+        echo -e "  ${RED}Could not detect a supported package manager.${RESET}"
+        echo -e "  ${YELLOW}Install the following packages manually, then re-run bscan:${RESET}"
+        echo -e "  ${DIM}  $_pkgs${RESET}"
+        echo -e "  ${DIM}  (package names may vary — consult your distro docs)${RESET}"
+        return 1
+    fi
+}
+
 # Install Homebrew and wire it into the shell rc
 _install_homebrew() {
+    local _rc
+    _rc=$(_shell_rc)
+
+    # On Linux, install system dependencies first
+    if [[ "$(uname -s)" == "Linux" ]]; then
+        echo -e "  ${YELLOW}Linux detected — Homebrew requires system packages before it can install.${RESET}"
+        echo ""
+        echo -e "  ${BOLD}  Install Homebrew dependencies via your package manager now? [Y/n]${RESET}"
+        echo -e "  ${DIM}  Required: build-essential procps curl file git (names vary by distro)${RESET}"
+        read -rp "  > " _dep_yn
+        _dep_yn=$(echo "${_dep_yn:-y}" | tr '[:upper:]' '[:lower:]')
+        if [[ "$_dep_yn" == "y" || "$_dep_yn" == "yes" ]]; then
+            echo ""
+            if ! _install_brew_linux_deps; then
+                echo -e "  ${RED}Dependency install failed or skipped. Install them manually, then re-run bscan.${RESET}"
+                return 1
+            fi
+            echo -e "  ${GREEN}✔ Dependencies installed.${RESET}"
+        else
+            echo -e "  ${YELLOW}Skipped. Install these packages first, then re-run bscan:${RESET}"
+            echo -e "  ${DIM}  build-essential procps curl file git${RESET}"
+            return 1
+        fi
+        echo ""
+    fi
+
     echo -e "  ${CYAN}Installing Homebrew...${RESET}"
     if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
         echo -e "  ${RED}Homebrew installation failed.${RESET}"
         return 1
     fi
 
-    # Determine brew prefix and the shellenv eval line
-    local _brew_prefix _shellenv_line _rc
+    # Determine brew prefix
+    local _brew_prefix
     if [[ -x "/opt/homebrew/bin/brew" ]]; then
-        _brew_prefix="/opt/homebrew"
+        _brew_prefix="/opt/homebrew"                        # macOS Apple Silicon
     elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-        _brew_prefix="/home/linuxbrew/.linuxbrew"
+        _brew_prefix="/home/linuxbrew/.linuxbrew"           # Linux
     elif [[ -x "/usr/local/bin/brew" ]]; then
-        _brew_prefix="/usr/local"
+        _brew_prefix="/usr/local"                           # macOS Intel
     else
         echo -e "  ${RED}Could not locate brew binary after install.${RESET}"
         return 1
     fi
 
-    _shellenv_line="eval \"\$(${_brew_prefix}/bin/brew shellenv)\""
-    _rc=$(_shell_rc)
+    local _shellenv_line="eval \"\$(${_brew_prefix}/bin/brew shellenv)\""
     touch "$_rc"
     _append_if_missing "$_rc" "$_shellenv_line"
 
     # Activate for the current session
     eval "$("${_brew_prefix}/bin/brew" shellenv)"
-    echo -e "  ${GREEN}✔ Homebrew installed and configured: $_brew_prefix${RESET}"
+    echo -e "  ${GREEN}✔ Homebrew installed: $_brew_prefix${RESET}"
+    echo -e "  ${GREEN}✔ Shell env written to $_rc${RESET}"
 }
 
 # Install Go via Homebrew and wire GOPATH/bin into the shell rc
