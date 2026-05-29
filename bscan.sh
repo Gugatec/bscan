@@ -211,8 +211,21 @@ _run_uninstall() {
     fi
     if [[ "$_do_remove_bscan" == "y" ]]; then
         _remove_bscan=y
-        echo -e "  ${GREEN}  ✔ Removal scheduled.${RESET}"
-        # Write a self-contained cleanup script to /tmp
+
+        # Deregister from git: remove all remotes then wipe .git so no
+        # sync operation can run against this directory ever again.
+        echo -e "  ${CYAN}  Deregistering bscan from git...${RESET}"
+        git -C "$BSCAN_REPO_DIR" remote | while read -r _r; do
+            git -C "$BSCAN_REPO_DIR" remote remove "$_r" 2>/dev/null || true
+        done
+        rm -rf "$BSCAN_REPO_DIR/.git"
+        echo -e "  ${GREEN}  ✔ Git remotes and history removed — syncing disabled.${RESET}"
+
+        # Prevent sync checks from firing after we return from this function.
+        SYNC_BSCAN_REPO=no
+        SYNC_CATALOG=no
+
+        # Write a self-contained cleanup script to /tmp.
         local _cleanup_script="/tmp/bscan_cleanup_$$.sh"
         cat > "$_cleanup_script" << CLEANUP
 #!/usr/bin/env bash
@@ -222,6 +235,7 @@ rm -f "$_cleanup_script"
 echo "bscan removed."
 CLEANUP
         chmod +x "$_cleanup_script"
+        echo -e "  ${GREEN}  ✔ Removal scheduled.${RESET}"
         echo -e "  ${DIM}  Will run automatically after bscan exits:${RESET}"
         echo -e "  ${DIM}    $_cleanup_script${RESET}"
     fi
@@ -233,7 +247,6 @@ CLEANUP
 
     if [[ "$_remove_bscan" == "y" ]]; then
         echo -e "${DIM}Removing bscan...${RESET}"
-        # Launch cleanup in background then exit
         bash "/tmp/bscan_cleanup_$$.sh" &
         exit 0
     fi
