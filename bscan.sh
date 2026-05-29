@@ -166,7 +166,7 @@ echo ""
 echo -e "${CYAN}${BOLD}Select Bumblebee Scan Profile:${RESET}"
 echo "  1) Baseline          (Quick global packages/extensions checklist)"
 echo "  2) Project           (Targeted workspace/lockfile inspection)"
-echo "  3) Deep ${BOLD}[DEFAULT]${RESET}    (Aggressive cross-user ecosystem sweep)"
+echo -e "  3) Deep ${BOLD}[DEFAULT]${RESET}    (Aggressive cross-user ecosystem sweep)"
 echo "  4) Incident Response (Targeted emergency vulnerability triage)"
 echo ""
 read -rp "Choose a profile [1-4, Default: 3]: " profile_choice
@@ -274,7 +274,7 @@ _parse_summary() {
 }
 
 FINDINGS=$(_parse_findings)
-FINDING_COUNT=$(echo "$FINDINGS" | grep -c '•' 2>/dev/null || echo "0")
+FINDING_COUNT=$(echo "$FINDINGS" | grep -c '•' || true)
 
 HUMAN_DASHBOARD=$(cat << DASHBOARD
 ========================================================
