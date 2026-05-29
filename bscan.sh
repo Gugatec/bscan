@@ -9,6 +9,10 @@ CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 # --- Error trap ---
 trap 'echo -e "\n${RED}[ERROR]${RESET} Script failed at line $LINENO. Exit code: $?" >&2' ERR
 
+# --- Resolve bscan repo dir even when run via symlink ---
+_REAL_SCRIPT="$(readlink "$0" 2>/dev/null || echo "$0")"
+BSCAN_REPO_DIR="$(cd "$(dirname "$_REAL_SCRIPT")" && pwd)"
+
 # --- Persistent Configuration File Setup ---
 CONFIG_FILE="$HOME/.bumblebee_scan_config"
 
@@ -18,6 +22,8 @@ DEFAULT_OUTPUT_FORMAT="human"
 DEFAULT_EXPORT_REPORT="yes"
 DEFAULT_LOG_DIR="$HOME/_scripts/LOGS"
 DEFAULT_RETENTION_DAYS="180"
+DEFAULT_SYNC_BSCAN_REPO="yes"
+DEFAULT_SYNC_CATALOG="yes"
 
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
@@ -29,6 +35,8 @@ load_config() {
     EXPORT_REPORT="${EXPORT_REPORT:-$DEFAULT_EXPORT_REPORT}"
     LOG_DIR="${LOG_DIR:-$DEFAULT_LOG_DIR}"
     RETENTION_DAYS="${RETENTION_DAYS:-$DEFAULT_RETENTION_DAYS}"
+    SYNC_BSCAN_REPO="${SYNC_BSCAN_REPO:-$DEFAULT_SYNC_BSCAN_REPO}"
+    SYNC_CATALOG="${SYNC_CATALOG:-$DEFAULT_SYNC_CATALOG}"
 }
 
 save_config() {
@@ -39,6 +47,8 @@ OUTPUT_FORMAT="$OUTPUT_FORMAT"
 EXPORT_REPORT="$EXPORT_REPORT"
 LOG_DIR="$LOG_DIR"
 RETENTION_DAYS="$RETENTION_DAYS"
+SYNC_BSCAN_REPO="$SYNC_BSCAN_REPO"
+SYNC_CATALOG="$SYNC_CATALOG"
 EOF
 }
 
@@ -49,6 +59,8 @@ reset_config() {
     EXPORT_REPORT="$DEFAULT_EXPORT_REPORT"
     LOG_DIR="$DEFAULT_LOG_DIR"
     RETENTION_DAYS="$DEFAULT_RETENTION_DAYS"
+    SYNC_BSCAN_REPO="$DEFAULT_SYNC_BSCAN_REPO"
+    SYNC_CATALOG="$DEFAULT_SYNC_CATALOG"
     save_config
     echo -e "${GREEN}Configuration reset to defaults.${RESET}"
     sleep 1
@@ -68,7 +80,9 @@ while true; do
     echo -e "  ${BOLD}[4]${RESET} Auto-Export Report   : ${YELLOW}$EXPORT_REPORT${RESET}"
     echo -e "  ${BOLD}[5]${RESET} Log Directory Path   : ${YELLOW}$LOG_DIR${RESET}"
     echo -e "  ${BOLD}[6]${RESET} Log Retention Rules  : Delete logs older than ${YELLOW}$RETENTION_DAYS${RESET} days"
-    echo -e "  ${BOLD}[7]${RESET} Reset to Defaults"
+    echo -e "  ${BOLD}[7]${RESET} Sync bscan Repo      : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
+    echo -e "  ${BOLD}[8]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
+    echo -e "  ${BOLD}[9]${RESET} Reset to Defaults"
     echo -e "${CYAN}---------------------------------------------------------${RESET}"
     echo -e "  ${GREEN}${BOLD}[P] PROCEED TO RUN SCAN${RESET}  |  ${RED}[Q] QUIT PROGRAM${RESET}"
     echo -e "${CYAN}=========================================================${RESET}"
@@ -117,6 +131,16 @@ while true; do
             if [[ "$input_val" =~ ^[0-9]+$ ]]; then RETENTION_DAYS="$input_val"; save_config; fi
             ;;
         7)
+            read -rp "Sync bscan repo before each run? [yes/no]: " input_val
+            input_val=$(echo "$input_val" | tr '[:upper:]' '[:lower:]')
+            if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then SYNC_BSCAN_REPO="$input_val"; save_config; fi
+            ;;
+        8)
+            read -rp "Sync threat catalog before each run? [yes/no]: " input_val
+            input_val=$(echo "$input_val" | tr '[:upper:]' '[:lower:]')
+            if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then SYNC_CATALOG="$input_val"; save_config; fi
+            ;;
+        9)
             read -rp "Reset all settings to defaults? [y/N]: " confirm_reset
             confirm_reset=$(echo "$confirm_reset" | tr '[:upper:]' '[:lower:]')
             if [[ "$confirm_reset" == "y" || "$confirm_reset" == "yes" ]]; then reset_config; fi
@@ -166,12 +190,23 @@ fi
 
 # --- Repository Sync ---
 echo ""
-echo -e "${CYAN}==> Updating Threat Catalogs...${RESET}"
-if [ -d "$BUMBLEBEE_DIR" ]; then
-    git -C "$BUMBLEBEE_DIR" pull
+if [[ "$SYNC_BSCAN_REPO" == "yes" ]]; then
+    echo -e "${CYAN}==> Syncing bscan repo...${RESET}"
+    git -C "$BSCAN_REPO_DIR" pull
 else
-    echo -e "${RED}ERROR: Core directory missing at $BUMBLEBEE_DIR${RESET}"
-    exit 1
+    echo -e "${YELLOW}-- bscan repo sync skipped (disabled in config)${RESET}"
+fi
+
+if [[ "$SYNC_CATALOG" == "yes" ]]; then
+    echo -e "${CYAN}==> Syncing threat catalog...${RESET}"
+    if [ -d "$BUMBLEBEE_DIR" ]; then
+        git -C "$BUMBLEBEE_DIR" pull
+    else
+        echo -e "${RED}ERROR: Bumblebee directory missing at $BUMBLEBEE_DIR${RESET}"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}-- Threat catalog sync skipped (disabled in config)${RESET}"
 fi
 
 if [ ! -d "$CATALOG_PATH" ]; then
