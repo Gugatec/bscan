@@ -79,7 +79,8 @@ reset_config() {
 _prompt_value() {
     local label="$1" default="$2" varname="$3"
     echo -e "  ${BOLD}${label}${RESET}"
-    read -re -i "$default" -p "  > " input_val
+    echo -e "  ${DIM}[default: ${default}]${RESET}"
+    read -re -p "  > " input_val
     printf -v "$varname" '%s' "${input_val:-$default}"
     echo ""
 }
@@ -101,25 +102,29 @@ first_run_setup() {
     _prompt_value "[4/8] Log retention (days)"     "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
 
     echo -e "  ${BOLD}[5/8] Output format${RESET}  (human = dashboard, raw = NDJSON)"
-    read -re -i "human" -p "  > " _fmt
+    echo -e "  ${DIM}[default: human]${RESET}"
+    read -re -p "  > " _fmt
     OUTPUT_FORMAT="${_fmt:-human}"
     [[ "$OUTPUT_FORMAT" != "raw" ]] && OUTPUT_FORMAT="human"
     echo ""
 
     echo -e "  ${BOLD}[6/8] Auto-export report after scan? [yes/no]${RESET}"
-    read -re -i "yes" -p "  > " _exp
+    echo -e "  ${DIM}[default: yes]${RESET}"
+    read -re -p "  > " _exp
     _exp=$(echo "${_exp:-yes}" | tr '[:upper:]' '[:lower:]')
     EXPORT_REPORT=$([[ "$_exp" == "no" ]] && echo "no" || echo "yes")
     echo ""
 
     echo -e "  ${BOLD}[7/8] Sync bscan repo before each run? [yes/no]${RESET}"
-    read -re -i "yes" -p "  > " _sbr
+    echo -e "  ${DIM}[default: yes]${RESET}"
+    read -re -p "  > " _sbr
     _sbr=$(echo "${_sbr:-yes}" | tr '[:upper:]' '[:lower:]')
     SYNC_BSCAN_REPO=$([[ "$_sbr" == "no" ]] && echo "no" || echo "yes")
     echo ""
 
     echo -e "  ${BOLD}[8/8] Sync threat catalog before each run? [yes/no]${RESET}"
-    read -re -i "yes" -p "  > " _sc
+    echo -e "  ${DIM}[default: yes]${RESET}"
+    read -re -p "  > " _sc
     _sc=$(echo "${_sc:-yes}" | tr '[:upper:]' '[:lower:]')
     SYNC_CATALOG=$([[ "$_sc" == "no" ]] && echo "no" || echo "yes")
     echo ""
