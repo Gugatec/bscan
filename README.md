@@ -1,6 +1,6 @@
 # bscan
 
-An interactive Bash wrapper for the [Bumblebee](https://github.com/SocketDev/socket-bumblebee) malicious-package scanner. Provides a persistent configuration panel, scan profile selection, threat catalog syncing, log management, and formatted report export — all from a single terminal script.
+An interactive Bash wrapper for the [Bumblebee](https://github.com/perplexityai/bumblebee) malicious-package scanner. Provides a persistent configuration panel, scan profile selection, threat catalog syncing, log management, and formatted report export — all from a single terminal script.
 
 ---
 
@@ -9,7 +9,7 @@ An interactive Bash wrapper for the [Bumblebee](https://github.com/SocketDev/soc
 | Dependency | Purpose |
 |---|---|
 | `bash` ≥ 3.2 | Script runtime (macOS system bash and Linux supported) |
-| [`bumblebee`](https://github.com/SocketDev/socket-bumblebee) | The underlying scanner engine (requires Node.js) |
+| [`bumblebee`](https://github.com/perplexityai/bumblebee) | The underlying scanner engine (requires Node.js) |
 | `git` | Syncing bscan and threat catalog repos |
 | `sudo` | Required by `bumblebee scan` |
 | `jq` *(optional)* | Faster/more reliable NDJSON parsing; falls back to `awk` if absent |
@@ -67,7 +67,7 @@ Path inputs accept shell variables (`$HOME`, `$USER`, `~`). They are expanded im
 Immediately after step 1, the wizard verifies the bumblebee repo exists at the given path:
 
 - **Found** → confirms with `✔ Bumblebee repo found.`
-- **Not found** → offers to clone `https://github.com/SocketDev/socket-bumblebee` directly. You can confirm the default path or enter a different install location. If you decline, the path is saved and you can install manually before running scans.
+- **Not found** → offers to clone `https://github.com/perplexityai/bumblebee` directly. You can confirm the default path or enter a different install location. If you decline, the path is saved and you can install manually before running scans.
 
 The wizard also checks whether the `bumblebee` CLI is available in `PATH` and shows a warning with the install URL if not.
 
@@ -89,7 +89,7 @@ Settings are stored in `.env` (gitignored, auto-generated on first run). A safe 
 | `OUTPUT_FORMAT` | `human` | `human` = formatted dashboard, `raw` = NDJSON passthrough |
 | `EXPORT_REPORT` | `yes` | Auto-save a report file after each scan |
 | `RETENTION_DAYS` | `180` | Delete report files older than this many days |
-| `SYNC_BSCAN_REPO` | `yes` | Pull latest bscan script from GitHub before each run |
+| `SYNC_BSCAN_REPO` | `yes` | Check for bscan updates before each run and offer to pull when behind |
 | `SYNC_CATALOG` | `yes` | Pull latest threat signatures from bumblebee repo before each run |
 | `SCAN_MODE` | `spinner` | `spinner` = progress indicator, `verbose` = live output stream |
 
@@ -105,7 +105,7 @@ You can edit `.env` directly or use the **Configuration Control Panel** shown at
   [4] Auto-Export Report   : yes
   [5] Log Directory Path   : /Users/me/_scripts/LOGS
   [6] Log Retention Rules  : Delete logs older than 180 days
-  [7] Sync bscan Repo      : yes
+  [7] Check bscan Updates  : yes
   [8] Sync Threat Catalog  : yes
   [9] Scan Output Mode     : spinner
   [0] Reset to Defaults
@@ -201,9 +201,9 @@ Files older than `RETENTION_DAYS` days are automatically purged at the start of 
 
 ## Sync Behaviour
 
-Before scanning, bscan can optionally pull the latest code for:
+Before scanning, bscan can optionally keep itself and its data current:
 
-- **bscan itself** (`SYNC_BSCAN_REPO=yes`) — ensures you always run the most recent version of this wrapper
+- **bscan itself** (`SYNC_BSCAN_REPO=yes`) — fetches from the remote and, if your checkout is behind, reports how many commits and offers to `pull --ff-only`. If you accept, bscan updates and exits so you can re-run the latest version. The check is skipped silently when the remote is unreachable or there's no upstream branch.
 - **Threat catalog** (`SYNC_CATALOG=yes`) — pulls fresh malicious-package signatures from the bumblebee repo
 
 Both are enabled by default and can be toggled independently via options `[7]` and `[8]` in the config panel.

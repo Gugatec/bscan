@@ -16,6 +16,9 @@ BSCAN_REPO_DIR="$(cd "$(dirname "$_REAL_SCRIPT")" && pwd)"
 ENV_FILE="$BSCAN_REPO_DIR/.env"
 ENV_SAMPLE="$BSCAN_REPO_DIR/.env-sample"
 
+# --- Upstream bumblebee repo (override via BUMBLEBEE_REPO_URL in .env) ---
+BUMBLEBEE_REPO_URL="${BUMBLEBEE_REPO_URL:-https://github.com/perplexityai/bumblebee}"
+
 # --- Default values ---
 DEFAULT_BUMBLEBEE_DIR="$HOME/bumblebee"
 DEFAULT_SCAN_ROOT="$HOME"
@@ -51,6 +54,7 @@ save_config() {
     cat > "$ENV_FILE" << EOF
 # bscan local configuration — DO NOT COMMIT this file
 BUMBLEBEE_DIR="$BUMBLEBEE_DIR"
+BUMBLEBEE_REPO_URL="$BUMBLEBEE_REPO_URL"
 SCAN_ROOT="$SCAN_ROOT"
 OUTPUT_FORMAT="$OUTPUT_FORMAT"
 EXPORT_REPORT="$EXPORT_REPORT"
@@ -105,12 +109,14 @@ _ensure_bumblebee() {
             fi
 
             echo ""
-            echo -e "  ${CYAN}Cloning https://github.com/SocketDev/socket-bumblebee${RESET}"
+            echo -e "  ${CYAN}Cloning $BUMBLEBEE_REPO_URL${RESET}"
             echo -e "  ${CYAN}        into $BUMBLEBEE_DIR ...${RESET}"
-            if git clone https://github.com/SocketDev/socket-bumblebee "$BUMBLEBEE_DIR"; then
+            if git clone "$BUMBLEBEE_REPO_URL" "$BUMBLEBEE_DIR"; then
                 echo -e "  ${GREEN}✔ Bumblebee cloned to: $BUMBLEBEE_DIR${RESET}"
             else
                 echo -e "  ${RED}Clone failed. Install manually and update BUMBLEBEE_DIR in .env before scanning.${RESET}"
+                echo -e "  ${DIM}  If the repo is private, authenticate first (gh auth login or an SSH key)${RESET}"
+                echo -e "  ${DIM}  and/or set BUMBLEBEE_REPO_URL in .env to an SSH URL.${RESET}"
             fi
         else
             echo -e "  ${YELLOW}Skipped. Update BUMBLEBEE_DIR in .env and re-run when bumblebee is installed.${RESET}"
@@ -122,7 +128,7 @@ _ensure_bumblebee() {
         echo -e "  ${GREEN}✔ Bumblebee CLI available: $(command -v bumblebee)${RESET}"
     else
         echo -e "  ${YELLOW}⚠  Bumblebee CLI not found in PATH.${RESET}"
-        echo -e "  ${DIM}  Follow the install instructions at: https://github.com/SocketDev/socket-bumblebee${RESET}"
+        echo -e "  ${DIM}  Follow the install instructions at: $BUMBLEBEE_REPO_URL${RESET}"
     fi
     echo ""
 }
@@ -150,7 +156,7 @@ first_run_setup() {
     # [1/8] Required — no default
     while true; do
         echo -e "  ${BOLD}[1/8] Bumblebee home directory${RESET}"
-        echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo (github.com/SocketDev/socket-bumblebee)${RESET}"
+        echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo ($BUMBLEBEE_REPO_URL)${RESET}"
         read -re -p "  > " BUMBLEBEE_DIR
         if [[ -n "$BUMBLEBEE_DIR" ]]; then BUMBLEBEE_DIR=$(_expand_path "$BUMBLEBEE_DIR"); break; fi
         echo -e "  ${RED}Path is required.${RESET}\n"
@@ -215,8 +221,8 @@ first_run_setup() {
     EXPORT_REPORT=$([[ "$_exp" == "no" ]] && echo "no" || echo "yes")
     echo ""
 
-    echo -e "  ${BOLD}[7/8] Sync bscan repo before each run? [yes/no]${RESET}"
-    echo -e "  ${DIM}[default: yes]${RESET}"
+    echo -e "  ${BOLD}[7/8] Check for bscan updates before each run? [yes/no]${RESET}"
+    echo -e "  ${DIM}Offers to pull the latest bscan when your checkout is behind. [default: yes]${RESET}"
     read -re -p "  > " _sbr
     _sbr=$(echo "${_sbr:-yes}" | tr '[:upper:]' '[:lower:]')
     SYNC_BSCAN_REPO=$([[ "$_sbr" == "no" ]] && echo "no" || echo "yes")
@@ -263,7 +269,7 @@ while true; do
     echo -e "  ${BOLD}[4]${RESET} Auto-Export Report   : ${YELLOW}$EXPORT_REPORT${RESET}"
     echo -e "  ${BOLD}[5]${RESET} Log Directory Path   : ${YELLOW}$LOG_DIR${RESET}"
     echo -e "  ${BOLD}[6]${RESET} Log Retention Rules  : Delete logs older than ${YELLOW}$RETENTION_DAYS${RESET} days"
-    echo -e "  ${BOLD}[7]${RESET} Sync bscan Repo      : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
+    echo -e "  ${BOLD}[7]${RESET} Check bscan Updates  : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
     echo -e "  ${BOLD}[8]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
     echo -e "  ${BOLD}[9]${RESET} Scan Output Mode     : ${YELLOW}$SCAN_MODE${RESET}"
     echo -e "  ${BOLD}[0]${RESET} Reset to Defaults"
@@ -395,10 +401,39 @@ fi
 
 echo ""
 if [[ "$SYNC_BSCAN_REPO" == "yes" ]]; then
-    echo -e "${CYAN}==> Syncing bscan repo...${RESET}"
-    git -C "$BSCAN_REPO_DIR" pull
+    echo -e "${CYAN}==> Checking for bscan updates...${RESET}"
+    if ! git -C "$BSCAN_REPO_DIR" rev-parse --git-dir &>/dev/null; then
+        echo -e "${YELLOW}-- Not a git checkout; skipping update check.${RESET}"
+    elif ! git -C "$BSCAN_REPO_DIR" fetch --quiet 2>/dev/null; then
+        echo -e "${YELLOW}-- Could not reach remote; skipping update check.${RESET}"
+    else
+        _branch=$(git -C "$BSCAN_REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null)
+        _upstream=$(git -C "$BSCAN_REPO_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+        if [[ -z "$_upstream" ]]; then
+            echo -e "${YELLOW}-- No upstream tracking branch for '$_branch'; skipping.${RESET}"
+        else
+            _behind=$(git -C "$BSCAN_REPO_DIR" rev-list --count "HEAD..$_upstream" 2>/dev/null || echo 0)
+            if [[ "$_behind" -gt 0 ]]; then
+                echo -e "${YELLOW}  bscan is $_behind commit(s) behind $_upstream.${RESET}"
+                read -rp "  Update now? [Y/n]: " _upd_yn
+                _upd_yn=$(echo "${_upd_yn:-y}" | tr '[:upper:]' '[:lower:]')
+                if [[ "$_upd_yn" == "y" || "$_upd_yn" == "yes" ]]; then
+                    if git -C "$BSCAN_REPO_DIR" pull --ff-only; then
+                        echo -e "${GREEN}  ✔ bscan updated. Re-run to use the latest version.${RESET}"
+                        exit 0
+                    else
+                        echo -e "${RED}  Update failed (local changes?). Resolve manually with: git -C \"$BSCAN_REPO_DIR\" pull${RESET}"
+                    fi
+                else
+                    echo -e "${DIM}  Skipped update.${RESET}"
+                fi
+            else
+                echo -e "${GREEN}  ✔ bscan is up to date.${RESET}"
+            fi
+        fi
+    fi
 else
-    echo -e "${YELLOW}-- bscan repo sync skipped (disabled in config)${RESET}"
+    echo -e "${YELLOW}-- bscan update check skipped (disabled in config)${RESET}"
 fi
 
 if [[ "$SYNC_CATALOG" == "yes" ]]; then
@@ -410,11 +445,11 @@ if [[ "$SYNC_CATALOG" == "yes" ]]; then
         read -rp "  Clone it now? [Y/n]: " _reclone_yn
         _reclone_yn=$(echo "${_reclone_yn:-y}" | tr '[:upper:]' '[:lower:]')
         if [[ "$_reclone_yn" == "y" || "$_reclone_yn" == "yes" ]]; then
-            echo -e "${CYAN}  Cloning https://github.com/SocketDev/socket-bumblebee into $BUMBLEBEE_DIR ...${RESET}"
-            if git clone https://github.com/SocketDev/socket-bumblebee "$BUMBLEBEE_DIR"; then
+            echo -e "${CYAN}  Cloning $BUMBLEBEE_REPO_URL into $BUMBLEBEE_DIR ...${RESET}"
+            if git clone "$BUMBLEBEE_REPO_URL" "$BUMBLEBEE_DIR"; then
                 echo -e "${GREEN}  ✔ Cloned successfully.${RESET}"
             else
-                echo -e "${RED}  Clone failed. Fix BUMBLEBEE_DIR in .env and re-run.${RESET}"; exit 1
+                echo -e "${RED}  Clone failed. Fix BUMBLEBEE_DIR/BUMBLEBEE_REPO_URL in .env and re-run.${RESET}"; exit 1
             fi
         else
             echo -e "${RED}ERROR: Bumblebee repo required. Fix BUMBLEBEE_DIR in .env and re-run.${RESET}"; exit 1
