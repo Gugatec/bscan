@@ -91,7 +91,7 @@ _uninstall_step() {
     echo -e "  ${BOLD}$_label${RESET}"
     [[ -n "$_detail" ]] && echo -e "  ${DIM}  $_detail${RESET}"
     read -rp "  Remove? [y/N]: " _yn
-    echo "${_yn:-n}" | tr '[:upper:]' '[:lower:]'
+    [[ "${_yn:-n}" =~ ^[Yy] ]]
 }
 
 # Four-gate confirmation for irreversible uninstalls (Go / Homebrew).
@@ -159,7 +159,7 @@ _run_uninstall() {
     esac
 
     # In full mode every step runs automatically; in step mode each is confirmed.
-    # _should_run <label> [detail]
+    # _should_run <label> [detail]  — returns 0 to proceed, 1 to skip
     _should_run() {
         local _label="$1"
         local _detail="${2:-}"
@@ -169,7 +169,7 @@ _run_uninstall() {
             [[ -n "$_detail" ]] && echo -e "  ${DIM}    $_detail${RESET}"
             return 0
         fi
-        [[ "$(_uninstall_step "$_label" "$_detail")" =~ ^y ]]
+        _uninstall_step "$_label" "$_detail"
     }
 
     echo ""
