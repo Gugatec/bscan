@@ -164,6 +164,30 @@ _manage_symlink() {
 # First-run setup wizard
 # ---------------------------------------------------------------------------
 
+_find_bumblebee_bin() {
+    # 1. Already in PATH
+    if command -v bumblebee &>/dev/null; then
+        command -v bumblebee; return 0
+    fi
+    # 2. $GOBIN (explicit override)
+    if [[ -n "${GOBIN:-}" && -x "$GOBIN/bumblebee" ]]; then
+        echo "$GOBIN/bumblebee"; return 0
+    fi
+    # 3. $GOPATH/bin (explicit GOPATH)
+    if [[ -n "${GOPATH:-}" && -x "$GOPATH/bin/bumblebee" ]]; then
+        echo "$GOPATH/bin/bumblebee"; return 0
+    fi
+    # 4. Default Go install location ($HOME/go/bin)
+    if [[ -x "$HOME/go/bin/bumblebee" ]]; then
+        echo "$HOME/go/bin/bumblebee"; return 0
+    fi
+    # 5. Binary built locally inside the repo clone
+    if [[ -n "${BUMBLEBEE_DIR:-}" && -x "$BUMBLEBEE_DIR/bumblebee" ]]; then
+        echo "$BUMBLEBEE_DIR/bumblebee"; return 0
+    fi
+    return 1
+}
+
 _expand_path() {
     # Expand $VAR and ~ so user-typed paths like $HOME/foo work immediately
     eval echo "$1"
@@ -207,11 +231,13 @@ _ensure_bumblebee() {
     fi
 
     echo ""
-    if command -v bumblebee &>/dev/null; then
-        echo -e "  ${GREEN}✔ Bumblebee CLI available: $(command -v bumblebee)${RESET}"
+    local _bb_bin
+    if _bb_bin=$(_find_bumblebee_bin); then
+        echo -e "  ${GREEN}✔ Bumblebee CLI available: $_bb_bin${RESET}"
     else
         echo -e "  ${YELLOW}⚠  Bumblebee CLI not found in PATH.${RESET}"
-        echo -e "  ${DIM}  Follow the install instructions at: $BUMBLEBEE_REPO_URL${RESET}"
+        echo -e "  ${DIM}  Install via: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+        echo -e "  ${DIM}  Full instructions: $BUMBLEBEE_REPO_URL${RESET}"
     fi
     echo ""
     return 0
@@ -603,11 +629,11 @@ _spinner() {
     printf "\r%-60s\r" ""
 }
 
-BUMBLEBEE_BIN=$(command -v bumblebee 2>/dev/null || true)
+BUMBLEBEE_BIN=$(_find_bumblebee_bin 2>/dev/null || true)
 if [[ -z "$BUMBLEBEE_BIN" ]]; then
-    echo -e "${RED}ERROR: 'bumblebee' not found in PATH.${RESET}"
-    echo -e "${DIM}Install it following: $BUMBLEBEE_REPO_URL${RESET}"
-    echo -e "${DIM}Then ensure the install directory is in your PATH and re-run bscan.${RESET}"
+    echo -e "${RED}ERROR: 'bumblebee' binary not found.${RESET}"
+    echo -e "${DIM}Install via: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+    echo -e "${DIM}Full instructions: $BUMBLEBEE_REPO_URL${RESET}"
     exit 1
 fi
 
