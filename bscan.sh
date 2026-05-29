@@ -5,6 +5,7 @@ set -euo pipefail
 # --- ANSI Color Palette ---
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+BLINK='\033[5m'
 
 # --- Error trap ---
 trap 'echo -e "\n${RED}[ERROR]${RESET} Script failed at line $LINENO. Exit code: $?" >&2' ERR
@@ -91,6 +92,42 @@ _uninstall_step() {
     echo "${_yn:-n}" | tr '[:upper:]' '[:lower:]'
 }
 
+# Four-gate confirmation for irreversible uninstalls (Go / Homebrew).
+# Usage: _confirm_destructive "GO" "UNINSTALL GO"
+# Returns 0 only when all four gates pass; exits the function with 1 otherwise.
+_confirm_destructive() {
+    local _name="$1"        # display name, e.g. "GO"
+    local _phrase="$2"      # phrase to type, e.g. "UNINSTALL GO"
+
+    echo ""
+    # Gate 1
+    read -rp "  Are you sure you want to uninstall $_name? [y/N]: " _g1
+    [[ ! "${_g1:-n}" =~ ^[Yy] ]] && echo -e "  ${DIM}Cancelled.${RESET}" && return 1
+
+    # Gate 2
+    read -rp "  Confirm again — uninstall $_name? [y/N]: " _g2
+    [[ ! "${_g2:-n}" =~ ^[Yy] ]] && echo -e "  ${DIM}Cancelled.${RESET}" && return 1
+
+    # Gate 3 — type the phrase exactly
+    echo ""
+    echo -e "  ${BOLD}Type exactly:${RESET} ${YELLOW}${_phrase}${RESET}"
+    read -rp "  > " _typed
+    if [[ "$_typed" != "$_phrase" ]]; then
+        echo -e "  ${RED}Phrase did not match — cancelled.${RESET}"
+        return 1
+    fi
+
+    # Gate 4 — flashing red final warning
+    echo ""
+    echo -e "  ${BOLD}${RED}${BLINK}⚠  Are you sure that you want to uninstall ${_name}?${RESET}"
+    echo -e "  ${BOLD}${RED}   This step is not reversible.${RESET}"
+    echo ""
+    read -rp "  Final confirmation — proceed? [y/N]: " _g4
+    [[ ! "${_g4:-n}" =~ ^[Yy] ]] && echo -e "  ${DIM}Cancelled.${RESET}" && return 1
+
+    return 0
+}
+
 _run_uninstall() {
     clear
     echo -e "${RED}${BOLD}"
@@ -166,7 +203,9 @@ _run_uninstall() {
     fi
 
     # 4. Uninstall Go
-    if _should_run "4. Uninstall Go (via Homebrew) and remove PATH entries from rc files"; then
+    echo ""
+    echo -e "  ${BOLD}4. Uninstall Go (via Homebrew) and remove PATH entries from rc files${RESET}"
+    if _confirm_destructive "GO" "UNINSTALL GO"; then
         if command -v brew &>/dev/null && brew list go &>/dev/null 2>&1; then
             echo -e "  ${CYAN}  Uninstalling Go via Homebrew...${RESET}"
             brew uninstall go && echo -e "  ${GREEN}  ✔ Go uninstalled.${RESET}" \
@@ -174,7 +213,6 @@ _run_uninstall() {
         else
             echo -e "  ${DIM}  Go does not appear to be managed by Homebrew — skipping brew uninstall.${RESET}"
         fi
-        # Remove GOPATH/bin PATH entries regardless of how Go was installed
         local _gopath_bin
         _gopath_bin="${GOPATH:-$HOME/go}/bin"
         _remove_from_rc "$_gopath_bin"
@@ -183,7 +221,9 @@ _run_uninstall() {
     fi
 
     # 5. Uninstall Homebrew
-    if _should_run "5. Uninstall Homebrew and remove shell env entries from rc files"; then
+    echo ""
+    echo -e "  ${BOLD}5. Uninstall Homebrew and remove shell env entries from rc files${RESET}"
+    if _confirm_destructive "HOMEBREW" "UNINSTALL HOMEBREW"; then
         if command -v brew &>/dev/null; then
             echo -e "  ${CYAN}  Running Homebrew uninstall script...${RESET}"
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)" \
