@@ -5,7 +5,7 @@ set -euo pipefail
 # --- ANSI Color Palette ---
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
-BLINK='\033[5m'; BG_RED='\033[41m'; WHITE='\033[97m'; ORANGE='\033[33m'
+BLINK='\033[5m'; BG_RED='\033[41m'; WHITE='\033[97m'; BLACK='\033[30m'; ORANGE='\033[33m'
 
 # --- Error trap ---
 trap 'echo -e "\n${RED}[ERROR]${RESET} Script failed at line $LINENO. Exit code: $?" >&2' ERR
@@ -122,10 +122,12 @@ _confirm_destructive() {
         return 1
     fi
 
-    # Gate 4 — flashing warning: red background, text blinks white→orange
+    # Gate 4 — flashing warning: solid red border, text blinks white↔black
     echo ""
-    echo -e "  ${BG_RED}${BOLD}${BLINK}${WHITE}  ⚠  Are you sure that you want to uninstall ${_name}?  ${RESET}"
-    echo -e "  ${BG_RED}${BOLD}${ORANGE}     This step is not reversible.                       ${RESET}"
+    echo -e "  ${BG_RED}                                                         ${RESET}"
+    echo -e "  ${BOLD}${BLINK}${WHITE}  ⚠  Are you sure that you want to uninstall ${_name}?  ${RESET}"
+    echo -e "  ${BOLD}${BLINK}${BLACK}     This step is not reversible.                       ${RESET}"
+    echo -e "  ${BG_RED}                                                         ${RESET}"
     echo ""
     read -rp "  Final confirmation — proceed? [y/N]: " _g4
     [[ ! "${_g4:-n}" =~ ^[Yy] ]] && echo -e "  ${DIM}Cancelled.${RESET}" && return 1
