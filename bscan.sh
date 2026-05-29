@@ -555,12 +555,62 @@ _set_log_dir() {
             _app=$(echo "${_app:-y}" | tr '[:upper:]' '[:lower:]')
             if [[ "$_app" != "n" && "$_app" != "no" ]]; then
                 LOG_DIR="${LOG_DIR%/}/bscan"
-                echo -e "  ${DIM}Path adjusted to: $LOG_DIR${RESET}"
             fi
+        fi
+        echo ""
+        echo -e "  ${BOLD}Directory that will be used:${RESET} ${YELLOW}$LOG_DIR${RESET}"
+        read -rp "  Confirm this path? [Y/n]: " _conf
+        _conf=$(echo "${_conf:-y}" | tr '[:upper:]' '[:lower:]')
+        if [[ "$_conf" == "n" || "$_conf" == "no" ]]; then
+            echo -e "  ${DIM}Restarting log directory selection...${RESET}"
+            echo ""
+            continue
         fi
         _validate_writable_dir "$LOG_DIR" && break
         echo ""
     done
+}
+
+# Check whether bscan itself is a git checkout and offer to clone it
+# if not (e.g. installed via release download).  Sets SYNC_BSCAN_REPO
+# to "no" automatically if the user declines or the clone fails.
+_ensure_bscan_repo() {
+    echo -e "  ${CYAN}Checking bscan repo at: ${BOLD}$BSCAN_REPO_DIR${RESET}"
+
+    if git -C "$BSCAN_REPO_DIR" rev-parse --git-dir &>/dev/null 2>&1; then
+        echo -e "  ${GREEN}✔ bscan is a git checkout — auto-update available.${RESET}"
+        SYNC_BSCAN_REPO=yes
+        return 0
+    fi
+
+    echo -e "  ${YELLOW}bscan was not installed via git clone (e.g. downloaded from a release).${RESET}"
+    echo -e "  ${DIM}  Without a git repo, automatic updates are not possible.${RESET}"
+    echo ""
+    echo -e "  ${BOLD}  Clone bscan repo now to enable auto-updates? [Y/n]${RESET}"
+    echo -e "  ${DIM}  git clone https://github.com/Gugatec/bscan.git \"$BSCAN_REPO_DIR\"${RESET}"
+    read -rp "  > " _clone_yn
+    _clone_yn=$(echo "${_clone_yn:-y}" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$_clone_yn" == "y" || "$_clone_yn" == "yes" ]]; then
+        local _tmp_dir
+        _tmp_dir=$(mktemp -d)
+        echo -e "  ${CYAN}Cloning bscan into a temporary location...${RESET}"
+        if git clone https://github.com/Gugatec/bscan.git "$_tmp_dir/bscan" 2>&1; then
+            # Merge .git into the existing install dir (preserves .env etc.)
+            cp -r "$_tmp_dir/bscan/.git" "$BSCAN_REPO_DIR/.git"
+            rm -rf "$_tmp_dir"
+            echo -e "  ${GREEN}✔ bscan git repo initialised at: $BSCAN_REPO_DIR${RESET}"
+            SYNC_BSCAN_REPO=yes
+        else
+            rm -rf "$_tmp_dir"
+            echo -e "  ${RED}Clone failed. Auto-updates disabled.${RESET}"
+            SYNC_BSCAN_REPO=no
+        fi
+    else
+        echo -e "  ${DIM}  Skipped. Auto-update set to: no${RESET}"
+        SYNC_BSCAN_REPO=no
+    fi
+    echo ""
 }
 
 _ensure_bumblebee() {
@@ -683,10 +733,60 @@ first_run_setup() {
     echo "  ╚═══════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
 
-    # [1/9] Required — loop until bumblebee is confirmed present or cloned
+    # ── BSCAN ──────────────────────────────────────────────────────
+    echo -e "${CYAN}${BOLD}  ╔══ BSCAN ════════════════════════════════════════════════╗${RESET}"
+    echo ""
+
+    # [1/9] Auto-update / git check
+    echo -e "  ${BOLD}[1/9] bscan auto-update${RESET}"
+    echo -e "  ${DIM}Checks for updates before each run and offers to pull when behind.${RESET}"
+    _ensure_bscan_repo
+    echo ""
+
+    # [2/9] Log directory
+    echo -e "  ${BOLD}[2/9] Log directory${RESET}"
+    echo -e "  ${DIM}Where scan reports will be saved. Will be created if it does not exist.${RESET}"
+    echo -e "  ${DIM}Relative paths are anchored to \$HOME automatically.${RESET}"
+    _set_log_dir
+    echo ""
+
+    # [3/9] Log retention
+    _prompt_value "[3/9] Log retention (days)" "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
+
+    # [4/9] Auto-export
+    echo -e "  ${BOLD}[4/9] Auto-export report after scan? [yes/no]${RESET}"
+    echo -e "  ${DIM}[default: yes]${RESET}"
+    read -re -p "  > " _exp
+    _exp=$(echo "${_exp:-yes}" | tr '[:upper:]' '[:lower:]')
+    EXPORT_REPORT=$([[ "$_exp" == "no" ]] && echo "no" || echo "yes")
+    echo ""
+
+    # [5/9] Output format
+    echo -e "  ${BOLD}[5/9] Output format${RESET}  (human = dashboard, raw = NDJSON)"
+    echo -e "  ${DIM}[default: human]${RESET}"
+    read -re -p "  > " _fmt
+    OUTPUT_FORMAT="${_fmt:-human}"
+    [[ "$OUTPUT_FORMAT" != "raw" ]] && OUTPUT_FORMAT="human"
+    echo ""
+
+    # [6/9] Install bscan symlink
+    echo -e "  ${BOLD}[6/9] Install 'bscan' command? [yes/no]${RESET}"
+    echo -e "  ${DIM}Creates a symlink so you can run 'bscan' from anywhere. [default: yes]${RESET}"
+    read -re -p "  > " _inst
+    _inst=$(echo "${_inst:-yes}" | tr '[:upper:]' '[:lower:]')
+    if [[ "$_inst" != "no" ]]; then
+        _install_symlink
+    fi
+    echo ""
+
+    # ── BUMBLEBEE ──────────────────────────────────────────────────
+    echo -e "${GREEN}${BOLD}  ╔══ BUMBLEBEE ════════════════════════════════════════════╗${RESET}"
+    echo ""
+
+    # [7/9] Bumblebee setup (path + deps + Go + CLI)
     while true; do
         while true; do
-            echo -e "  ${BOLD}[1/9] Bumblebee home directory${RESET}"
+            echo -e "  ${BOLD}[7/9] Bumblebee home directory${RESET}"
             echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo ($BUMBLEBEE_REPO_URL)${RESET}"
             read -re -p "  > " BUMBLEBEE_DIR
             if [[ -n "$BUMBLEBEE_DIR" ]]; then
@@ -703,9 +803,9 @@ first_run_setup() {
         if _ensure_bumblebee; then break; fi
     done
 
-    # [2/9] Required — no default
+    # [8/9] Scan root path
     while true; do
-        echo -e "  ${BOLD}[2/9] Scan root path${RESET}"
+        echo -e "  ${BOLD}[8/9] Scan root path${RESET}"
         case "$(uname -s)" in
             Linux)  _scan_eg="/home (all user directories), / (entire system)" ;;
             Darwin) _scan_eg="/Users (all user directories), / (entire system)" ;;
@@ -718,37 +818,8 @@ first_run_setup() {
     done
     echo ""
 
-    # [3/9] Required — validate or create directory
-    echo -e "  ${BOLD}[3/9] Log directory${RESET}"
-    echo -e "  ${DIM}Where scan reports will be saved. Will be created if it does not exist.${RESET}"
-    echo -e "  ${DIM}Relative paths are anchored to \$HOME automatically.${RESET}"
-    _set_log_dir
-    echo ""
-
-    _prompt_value "[4/9] Log retention (days)" "$DEFAULT_RETENTION_DAYS" RETENTION_DAYS
-
-    echo -e "  ${BOLD}[5/9] Output format${RESET}  (human = dashboard, raw = NDJSON)"
-    echo -e "  ${DIM}[default: human]${RESET}"
-    read -re -p "  > " _fmt
-    OUTPUT_FORMAT="${_fmt:-human}"
-    [[ "$OUTPUT_FORMAT" != "raw" ]] && OUTPUT_FORMAT="human"
-    echo ""
-
-    echo -e "  ${BOLD}[6/9] Auto-export report after scan? [yes/no]${RESET}"
-    echo -e "  ${DIM}[default: yes]${RESET}"
-    read -re -p "  > " _exp
-    _exp=$(echo "${_exp:-yes}" | tr '[:upper:]' '[:lower:]')
-    EXPORT_REPORT=$([[ "$_exp" == "no" ]] && echo "no" || echo "yes")
-    echo ""
-
-    echo -e "  ${BOLD}[7/9] Check for bscan updates before each run? [yes/no]${RESET}"
-    echo -e "  ${DIM}Offers to pull the latest bscan when your checkout is behind. [default: yes]${RESET}"
-    read -re -p "  > " _sbr
-    _sbr=$(echo "${_sbr:-yes}" | tr '[:upper:]' '[:lower:]')
-    SYNC_BSCAN_REPO=$([[ "$_sbr" == "no" ]] && echo "no" || echo "yes")
-    echo ""
-
-    echo -e "  ${BOLD}[8/9] Sync threat catalog before each run? [yes/no]${RESET}"
+    # [9/9] Sync threat catalog
+    echo -e "  ${BOLD}[9/9] Sync threat catalog before each run? [yes/no]${RESET}"
     echo -e "  ${DIM}[default: yes]${RESET}"
     read -re -p "  > " _sc
     _sc=$(echo "${_sc:-yes}" | tr '[:upper:]' '[:lower:]')
@@ -761,16 +832,6 @@ first_run_setup() {
     echo -e "${GREEN}${BOLD}  ✔ Configuration saved to: ${ENV_FILE}${RESET}"
     echo -e "${DIM}  Edit .env directly or use the config panel at any time.${RESET}"
     echo ""
-
-    echo -e "  ${BOLD}[9/9] Install 'bscan' command? [yes/no]${RESET}"
-    echo -e "  ${DIM}Creates a symlink so you can run 'bscan' from anywhere. [default: yes]${RESET}"
-    read -re -p "  > " _inst
-    _inst=$(echo "${_inst:-yes}" | tr '[:upper:]' '[:lower:]')
-    if [[ "$_inst" != "no" ]]; then
-        _install_symlink
-    fi
-    echo ""
-
     read -rp "  Press ENTER to continue to the scanner..."
     echo ""
 }
@@ -794,16 +855,20 @@ while true; do
     echo -e "${CYAN}${BOLD}=========================================================${RESET}"
     echo -e "${CYAN}${BOLD}       BUMBLEBEE SCANNER CONFIGURATION CONTROL PANEL     ${RESET}"
     echo -e "${CYAN}${BOLD}=========================================================${RESET}"
-    echo -e "  ${BOLD}[1]${RESET} Bumblebee Home Dir   : ${YELLOW}$BUMBLEBEE_DIR${RESET}"
-    echo -e "  ${BOLD}[2]${RESET} System Scan Target   : ${YELLOW}$SCAN_ROOT${RESET}"
-    echo -e "  ${BOLD}[3]${RESET} Target Output Format : ${YELLOW}$OUTPUT_FORMAT${RESET}"
+    echo -e "  ${CYAN}${BOLD}── BSCAN ──────────────────────────────────────────────${RESET}"
+    echo -e "  ${BOLD}[1]${RESET} Auto-Update          : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
+    echo -e "  ${BOLD}[2]${RESET} Log Directory        : ${YELLOW}$LOG_DIR${RESET}"
+    echo -e "  ${BOLD}[3]${RESET} Log Retention        : Delete logs older than ${YELLOW}$RETENTION_DAYS${RESET} days"
     echo -e "  ${BOLD}[4]${RESET} Auto-Export Report   : ${YELLOW}$EXPORT_REPORT${RESET}"
-    echo -e "  ${BOLD}[5]${RESET} Log Directory Path   : ${YELLOW}$LOG_DIR${RESET}"
-    echo -e "  ${BOLD}[6]${RESET} Log Retention Rules  : Delete logs older than ${YELLOW}$RETENTION_DAYS${RESET} days"
-    echo -e "  ${BOLD}[7]${RESET} Check bscan Updates  : ${YELLOW}$SYNC_BSCAN_REPO${RESET}"
-    echo -e "  ${BOLD}[8]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
-    echo -e "  ${BOLD}[9]${RESET} Scan Output Mode     : ${YELLOW}$SCAN_MODE${RESET}"
+    echo -e "  ${BOLD}[5]${RESET} Output Format        : ${YELLOW}$OUTPUT_FORMAT${RESET}"
+    echo -e "  ${BOLD}[6]${RESET} Scan Output Mode     : ${YELLOW}$SCAN_MODE${RESET}"
     echo ""
+    echo -e "  ${GREEN}${BOLD}── BUMBLEBEE ──────────────────────────────────────────${RESET}"
+    echo -e "  ${BOLD}[7]${RESET} Bumblebee Home Dir   : ${YELLOW}$BUMBLEBEE_DIR${RESET}"
+    echo -e "  ${BOLD}[8]${RESET} Scan Root            : ${YELLOW}$SCAN_ROOT${RESET}"
+    echo -e "  ${BOLD}[9]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
+    echo ""
+    echo -e "  ${YELLOW}${BOLD}── SYSTEM ─────────────────────────────────────────────${RESET}"
     echo -e "  ${BOLD}[L]${RESET} bscan Symlink        : ${YELLOW}$(_symlink_status)${RESET}"
     echo -e "  ${BOLD}[R]${RESET} Reconfigure (delete .env, re-run wizard)"
     echo -e "  ${BOLD}[U]${RESET} Uninstall"
@@ -816,6 +881,40 @@ while true; do
 
     case "$main_choice" in
         1)
+            _ensure_bscan_repo
+            save_config
+            ;;
+        2)
+            echo -e "  ${DIM}Relative paths are anchored to \$HOME automatically.${RESET}"
+            _set_log_dir
+            save_config
+            ;;
+        3)
+            read -rp "Enter number of days to retain logs (e.g., 180): " input_val
+            if [[ "$input_val" =~ ^[0-9]+$ ]]; then RETENTION_DAYS="$input_val"; save_config; fi
+            ;;
+        4)
+            read -rp "Enable automatic log exports? [yes/no]: " input_val
+            input_val=$(echo "$input_val" | tr '[:upper:]' '[:lower:]')
+            if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then EXPORT_REPORT="$input_val"; save_config; fi
+            ;;
+        5)
+            echo "  Select Output Format:"
+            echo "    1) human (Clean Visual Dashboard)"
+            echo "    2) raw   (Original NDJSON Objects)"
+            read -rp "Choose format [1-2]: " fmt_val
+            if [[ "$fmt_val" == "2" ]]; then OUTPUT_FORMAT="raw"; else OUTPUT_FORMAT="human"; fi
+            save_config
+            ;;
+        6)
+            echo "  Select Scan Output Mode:"
+            echo "    1) spinner  (Rotating indicator + elapsed time)"
+            echo "    2) verbose  (Live raw output from bumblebee)"
+            read -rp "Choose mode [1-2]: " mode_val
+            if [[ "$mode_val" == "2" ]]; then SCAN_MODE="verbose"; else SCAN_MODE="spinner"; fi
+            save_config
+            ;;
+        7)
             read -rp "Enter new Bumblebee Directory Path: " input_val
             if [[ -n "$input_val" ]]; then
                 input_val=$(_normalize_path "$input_val")
@@ -827,8 +926,8 @@ while true; do
                 BUMBLEBEE_DIR="$input_val"; save_config
             fi
             ;;
-        2)
-            read -rp "Enter new System Scan Target Path: " input_val
+        8)
+            read -rp "Enter new Scan Root Path: " input_val
             if [[ -n "$input_val" ]]; then
                 input_val=$(_normalize_path "$input_val")
                 if [[ ! -d "$input_val" ]]; then
@@ -837,45 +936,10 @@ while true; do
                 SCAN_ROOT="$input_val"; save_config
             fi
             ;;
-        3)
-            echo "  Select Output Format:"
-            echo "    1) human (Clean Visual Dashboard)"
-            echo "    2) raw   (Original NDJSON Objects)"
-            read -rp "Choose format [1-2]: " fmt_val
-            if [[ "$fmt_val" == "2" ]]; then OUTPUT_FORMAT="raw"; else OUTPUT_FORMAT="human"; fi
-            save_config
-            ;;
-        4)
-            read -rp "Enable automatic log exports? [yes/no]: " input_val
-            input_val=$(echo "$input_val" | tr '[:upper:]' '[:lower:]')
-            if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then EXPORT_REPORT="$input_val"; save_config; fi
-            ;;
-        5)
-            echo -e "  ${DIM}Relative paths are anchored to \$HOME automatically.${RESET}"
-            _set_log_dir
-            save_config
-            ;;
-        6)
-            read -rp "Enter number of days to retain logs (e.g., 180): " input_val
-            if [[ "$input_val" =~ ^[0-9]+$ ]]; then RETENTION_DAYS="$input_val"; save_config; fi
-            ;;
-        7)
-            read -rp "Sync bscan repo before each run? [yes/no]: " input_val
-            input_val=$(echo "$input_val" | tr '[:upper:]' '[:lower:]')
-            if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then SYNC_BSCAN_REPO="$input_val"; save_config; fi
-            ;;
-        8)
+        9)
             read -rp "Sync threat catalog before each run? [yes/no]: " input_val
             input_val=$(echo "$input_val" | tr '[:upper:]' '[:lower:]')
             if [[ "$input_val" == "yes" || "$input_val" == "no" ]]; then SYNC_CATALOG="$input_val"; save_config; fi
-            ;;
-        9)
-            echo "  Select Scan Output Mode:"
-            echo "    1) spinner  (Rotating indicator + elapsed time)"
-            echo "    2) verbose  (Live raw output from bumblebee)"
-            read -rp "Choose mode [1-2]: " mode_val
-            if [[ "$mode_val" == "2" ]]; then SCAN_MODE="verbose"; else SCAN_MODE="spinner"; fi
-            save_config
             ;;
         l)
             _manage_symlink
