@@ -66,6 +66,179 @@ SCAN_MODE="$SCAN_MODE"
 EOF
 }
 
+# ---------------------------------------------------------------------------
+# Uninstall
+# ---------------------------------------------------------------------------
+
+# Remove every line in any known rc file that contains a fixed string.
+_remove_from_rc() {
+    local _pattern="$1"
+    local _rc _tmp
+    for _rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile"; do
+        if [[ -f "$_rc" ]] && grep -qF "$_pattern" "$_rc" 2>/dev/null; then
+            _tmp=$(mktemp)
+            grep -vF "$_pattern" "$_rc" > "$_tmp" && mv "$_tmp" "$_rc"
+            echo -e "  ${GREEN}  ✔ Removed from $_rc${RESET}"
+        fi
+    done
+}
+
+_uninstall_step() {
+    local _label="$1"
+    echo ""
+    echo -e "  ${BOLD}$_label${RESET}"
+    read -rp "  Remove? [y/N]: " _yn
+    echo "${_yn:-n}" | tr '[:upper:]' '[:lower:]'
+}
+
+_run_uninstall() {
+    clear
+    echo -e "${RED}${BOLD}"
+    echo "  ╔═══════════════════════════════════════════════════════╗"
+    echo "  ║               BSCAN — UNINSTALL WIZARD               ║"
+    echo "  ╠═══════════════════════════════════════════════════════╣"
+    echo "  ║  Choose how to proceed:                               ║"
+    echo "  ║    [1] Step-by-step  — confirm each component        ║"
+    echo "  ║    [2] Full removal  — remove everything at once     ║"
+    echo "  ╚═══════════════════════════════════════════════════════╝"
+    echo -e "${RESET}"
+    read -rp "  Select mode [1/2] or ENTER to cancel: " _mode
+    case "${_mode:-}" in
+        1) _mode="step" ;;
+        2)
+            echo ""
+            echo -e "  ${RED}${BOLD}⚠  Full removal will uninstall ALL components listed below.${RESET}"
+            echo -e "  ${DIM}  symlink · log folder · bumblebee repo · Go · Homebrew · bscan itself${RESET}"
+            echo ""
+            read -rp "  Are you sure? [y/N]: " _fc1
+            if [[ ! "${_fc1:-n}" =~ ^[Yy] ]]; then echo -e "  ${DIM}Cancelled.${RESET}"; sleep 1; return; fi
+            read -rp "  Confirm full removal — this cannot be undone. [y/N]: " _fc2
+            if [[ ! "${_fc2:-n}" =~ ^[Yy] ]]; then echo -e "  ${DIM}Cancelled.${RESET}"; sleep 1; return; fi
+            _mode="full"
+            ;;
+        *) echo -e "  ${DIM}Cancelled.${RESET}"; sleep 1; return ;;
+    esac
+
+    # In full mode every step runs automatically; in step mode each is confirmed.
+    _should_run() {
+        local _label="$1"
+        if [[ "$_mode" == "full" ]]; then
+            echo -e "  ${CYAN}  → $_label${RESET}"
+            return 0
+        fi
+        [[ "$(_uninstall_step "$_label")" =~ ^y ]]
+    }
+
+    echo ""
+    local _remove_bscan=n
+
+    # 1. bscan symlink
+    if _should_run "1. Remove bscan command symlink"; then
+        local _removed=0
+        for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+            if [[ -L "$_d/bscan" ]]; then
+                rm -f "$_d/bscan"
+                echo -e "  ${GREEN}  ✔ Removed: $_d/bscan${RESET}"
+                _removed=1
+            fi
+        done
+        [[ "$_removed" -eq 0 ]] && echo -e "  ${DIM}  No symlink found.${RESET}"
+    fi
+
+    # 2. bscan log folder
+    if _should_run "2. Remove bscan log folder ($LOG_DIR)"; then
+        if [[ -d "$LOG_DIR" ]]; then
+            rm -rf "$LOG_DIR"
+            echo -e "  ${GREEN}  ✔ Removed: $LOG_DIR${RESET}"
+        else
+            echo -e "  ${DIM}  Log folder not found: $LOG_DIR${RESET}"
+        fi
+    fi
+
+    # 3. Bumblebee repo
+    if _should_run "3. Remove bumblebee repo ($BUMBLEBEE_DIR)"; then
+        if [[ -d "$BUMBLEBEE_DIR" ]]; then
+            rm -rf "$BUMBLEBEE_DIR"
+            echo -e "  ${GREEN}  ✔ Removed: $BUMBLEBEE_DIR${RESET}"
+        else
+            echo -e "  ${DIM}  Bumblebee repo not found: $BUMBLEBEE_DIR${RESET}"
+        fi
+    fi
+
+    # 4. Uninstall Go
+    if _should_run "4. Uninstall Go (via Homebrew) and remove PATH entries from rc files"; then
+        if command -v brew &>/dev/null && brew list go &>/dev/null 2>&1; then
+            echo -e "  ${CYAN}  Uninstalling Go via Homebrew...${RESET}"
+            brew uninstall go && echo -e "  ${GREEN}  ✔ Go uninstalled.${RESET}" \
+                              || echo -e "  ${RED}  brew uninstall go failed.${RESET}"
+        else
+            echo -e "  ${DIM}  Go does not appear to be managed by Homebrew — skipping brew uninstall.${RESET}"
+        fi
+        # Remove GOPATH/bin PATH entries regardless of how Go was installed
+        local _gopath_bin
+        _gopath_bin="${GOPATH:-$HOME/go}/bin"
+        _remove_from_rc "$_gopath_bin"
+        _remove_from_rc 'GOPATH'
+        echo -e "  ${GREEN}  ✔ Go PATH entries removed from rc files.${RESET}"
+    fi
+
+    # 5. Uninstall Homebrew
+    if _should_run "5. Uninstall Homebrew and remove shell env entries from rc files"; then
+        if command -v brew &>/dev/null; then
+            echo -e "  ${CYAN}  Running Homebrew uninstall script...${RESET}"
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)" \
+                && echo -e "  ${GREEN}  ✔ Homebrew uninstalled.${RESET}" \
+                || echo -e "  ${RED}  Homebrew uninstall script failed — check output above.${RESET}"
+        else
+            echo -e "  ${DIM}  Homebrew not found — skipping.${RESET}"
+        fi
+        _remove_from_rc 'brew shellenv'
+        echo -e "  ${GREEN}  ✔ Homebrew shell env entries removed from rc files.${RESET}"
+    fi
+
+    # 6. Remove bscan itself
+    echo ""
+    echo -e "  ${BOLD}6. Remove bscan itself ($BSCAN_REPO_DIR)${RESET}"
+    echo -e "  ${DIM}  This directory contains the script currently running.${RESET}"
+    echo -e "  ${DIM}  Removal is scheduled for after bscan exits.${RESET}"
+    local _do_remove_bscan=n
+    if [[ "$_mode" == "full" ]]; then
+        echo -e "  ${CYAN}  → Scheduled for removal after exit.${RESET}"
+        _do_remove_bscan=y
+    else
+        read -rp "  Remove? [y/N]: " _yn6
+        [[ "${_yn6:-n}" =~ ^[Yy] ]] && _do_remove_bscan=y
+    fi
+    if [[ "$_do_remove_bscan" == "y" ]]; then
+        _remove_bscan=y
+        echo -e "  ${GREEN}  ✔ Removal scheduled.${RESET}"
+        # Write a self-contained cleanup script to /tmp
+        local _cleanup_script="/tmp/bscan_cleanup_$$.sh"
+        cat > "$_cleanup_script" << CLEANUP
+#!/usr/bin/env bash
+sleep 1
+rm -rf "$BSCAN_REPO_DIR"
+rm -f "$_cleanup_script"
+echo "bscan removed."
+CLEANUP
+        chmod +x "$_cleanup_script"
+        echo -e "  ${DIM}  Will run automatically after bscan exits:${RESET}"
+        echo -e "  ${DIM}    $_cleanup_script${RESET}"
+    fi
+
+    echo ""
+    echo -e "${CYAN}  Uninstall complete. Summary above shows what was removed.${RESET}"
+    echo ""
+    read -rp "  Press ENTER to continue..."
+
+    if [[ "$_remove_bscan" == "y" ]]; then
+        echo -e "${DIM}Removing bscan...${RESET}"
+        # Launch cleanup in background then exit
+        bash "/tmp/bscan_cleanup_$$.sh" &
+        exit 0
+    fi
+}
+
 reconfigure() {
     echo ""
     echo -e "  ${RED}${BOLD}⚠  RECONFIGURE TO DEFAULTS${RESET}"
@@ -618,7 +791,9 @@ while true; do
     echo -e "  ${BOLD}[8]${RESET} Sync Threat Catalog  : ${YELLOW}$SYNC_CATALOG${RESET}"
     echo -e "  ${BOLD}[9]${RESET} Scan Output Mode     : ${YELLOW}$SCAN_MODE${RESET}"
     echo -e "  ${BOLD}[L]${RESET} bscan Symlink        : ${YELLOW}$(_symlink_status)${RESET}"
-    echo -e "  ${BOLD}[0]${RESET} Reconfigure (delete .env, re-run wizard)"
+    echo ""
+    echo -e "  ${BOLD}[R]${RESET} Reconfigure (delete .env, re-run wizard)"
+    echo -e "  ${BOLD}[U]${RESET} Uninstall"
     echo -e "${CYAN}---------------------------------------------------------${RESET}"
     echo -e "  ${GREEN}${BOLD}[P] PROCEED TO RUN SCAN${RESET}  |  ${RED}[Q] QUIT PROGRAM${RESET}"
     echo -e "${CYAN}=========================================================${RESET}"
@@ -692,8 +867,11 @@ while true; do
         l)
             _manage_symlink
             ;;
-        0)
+        r)
             reconfigure
+            ;;
+        u)
+            _run_uninstall
             ;;
         p|"")
             break
