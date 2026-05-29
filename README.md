@@ -184,12 +184,14 @@ Checks whether a valid git repository exists at the given path.
 #### 7c. Go installation check
 Checks whether the `go` binary is available. Go is required to install the bumblebee CLI.
 
-- **Found** → moves on to 7d.
+- **Found** → confirms the version and moves on to 7d. GOPATH/bin is still ensured in PATH and the shell rc file.
 - **Not found** → offers to install Go automatically via Homebrew. Answering **Y** triggers:
 
-  **Homebrew check** — if `brew` is also missing, installs it first.
+  **Homebrew check** — checks whether `brew` is available at all known prefixes (`/opt/homebrew`, `/home/linuxbrew/.linuxbrew`, `/usr/local`).
+  - **Found** → skips the installer, ensures `eval "$(brew shellenv)"` is in the shell rc and active in the current session, then proceeds to install Go.
+  - **Not found** → installs Homebrew first.
 
-  **On Linux only**, before the Homebrew installer runs, bscan installs required system packages via the detected package manager:
+  **Linux dependency pre-flight** (Linux only, before the Homebrew installer runs) — checks whether `gcc`, `make`, `curl`, `file`, `git`, and `ps` are already available. If all are present, the package manager step is skipped entirely. Otherwise bscan detects the package manager and installs only what is missing:
 
   | Distro family | Package manager | Packages installed |
   |---|---|---|
@@ -202,7 +204,7 @@ Checks whether the `go` binary is available. Go is required to install the bumbl
 
   On **macOS**, Homebrew's installer handles the only dependency (Xcode Command Line Tools) automatically.
 
-  After Homebrew is installed, bscan detects the correct prefix, appends `eval "$(brew shellenv)"` to your shell rc file, and activates it immediately. Go is then installed via `brew install go` and its bin directory is added to the rc file.
+  After Homebrew is confirmed present, Go is installed via `brew install go` (skipped if `go` is already available). GOPATH/bin is then added to PATH and appended to the shell rc file.
 
 #### 7d. Bumblebee CLI installation check
 Uses `_find_bumblebee_bin` to locate the binary across: system `PATH`, `$GOBIN`, `$GOPATH/bin`, `~/go/bin`, local repo build.
@@ -322,19 +324,19 @@ Accessed via option `[U]` in the Configuration Control Panel. Walks through remo
   [2] Full removal  — remove everything at once
 ```
 
-- **Step-by-step** — a `Remove? [y/N]` prompt is shown before each component. Answer `N` to skip any component you want to keep.
+- **Step-by-step** — before each prompt, a dim detail line shows exactly what will be removed (symlink paths, directory path + exists status, rc files affected). Answer `N` to skip any component.
 - **Full removal** — requires two confirmations upfront, then removes all six components in sequence. Go and Homebrew still require their own four-gate confirmation regardless of mode.
 
 ### Components removed in order
 
-| Step | Component | Confirmation required |
-|---|---|---|
-| 1 | **bscan symlink** | `Remove? [y/N]` |
-| 2 | **bscan log folder** | `Remove? [y/N]` |
-| 3 | **Bumblebee repo** | `Remove? [y/N]` |
-| 4 | **Go** | Four-gate confirmation (see below) |
-| 5 | **Homebrew** | Four-gate confirmation (see below) |
-| 6 | **bscan itself** | `Remove? [y/N]` — git deregistration runs first |
+| Step | Component | Detail shown | Confirmation |
+|---|---|---|---|
+| 1 | **bscan symlink** | Lists each found symlink path, or "none found" | `Remove? [y/N]` |
+| 2 | **bscan log folder** | Shows `LOG_DIR` path + exists/not-found | `Remove? [y/N]` |
+| 3 | **Bumblebee repo** | Shows `BUMBLEBEE_DIR` path + exists/not-found | `Remove? [y/N]` |
+| 4 | **Go** | Lists `brew uninstall go` + rc files to be cleaned | Four-gate (see below) |
+| 5 | **Homebrew** | Lists uninstall script + rc files to be cleaned | Four-gate (see below) |
+| 6 | **bscan itself** | Shows repo path; git deregistration runs first | `Remove? [y/N]` |
 
 ### Four-gate confirmation — Go and Homebrew
 
