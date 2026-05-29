@@ -235,9 +235,36 @@ _ensure_bumblebee() {
     if _bb_bin=$(_find_bumblebee_bin); then
         echo -e "  ${GREEN}✔ Bumblebee CLI available: $_bb_bin${RESET}"
     else
-        echo -e "  ${YELLOW}⚠  Bumblebee CLI not found in PATH.${RESET}"
-        echo -e "  ${DIM}  Install via: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
-        echo -e "  ${DIM}  Full instructions: $BUMBLEBEE_REPO_URL${RESET}"
+        echo -e "  ${YELLOW}⚠  Bumblebee CLI not found.${RESET}"
+        echo ""
+        if ! command -v go &>/dev/null; then
+            echo -e "  ${RED}Go is not installed — cannot auto-install bumblebee.${RESET}"
+            echo -e "  ${DIM}  Install Go first: https://go.dev/dl/${RESET}"
+            echo -e "  ${DIM}  Then run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+        else
+            echo -e "  ${BOLD}  Install bumblebee CLI via 'go install'? [Y/n]${RESET}"
+            echo -e "  ${DIM}  go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+            read -rp "  > " _go_inst
+            _go_inst=$(echo "${_go_inst:-y}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$_go_inst" == "y" || "$_go_inst" == "yes" ]]; then
+                echo ""
+                echo -e "  ${CYAN}Installing bumblebee...${RESET}"
+                if go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest; then
+                    if _bb_bin=$(_find_bumblebee_bin); then
+                        echo -e "  ${GREEN}✔ Bumblebee CLI installed: $_bb_bin${RESET}"
+                    else
+                        echo -e "  ${YELLOW}⚠  Installed but still not found — ensure Go's bin dir is in PATH.${RESET}"
+                        echo -e "  ${DIM}  Add to your shell rc: export PATH=\"\$(go env GOPATH)/bin:\$PATH\"${RESET}"
+                    fi
+                else
+                    echo -e "  ${RED}Installation failed. Install manually:${RESET}"
+                    echo -e "  ${DIM}  go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+                fi
+            else
+                echo -e "  ${DIM}  Skipped. Install manually before running scans:${RESET}"
+                echo -e "  ${DIM}  go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest${RESET}"
+            fi
+        fi
     fi
     echo ""
     return 0
