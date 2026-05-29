@@ -55,12 +55,23 @@ The first time `bscan.sh` is executed it detects the missing `.env` and launches
 
 | Step | Field | Behaviour |
 |---|---|---|
-| 1 | Bumblebee home directory | **Required.** Re-prompts until a value is entered. |
+| 1 | Bumblebee home directory | **Required.** Re-prompts until a value is entered. After confirming the path, the wizard checks whether the bumblebee repo exists there (see below). |
 | 2 | Scan root path | **Required.** Re-prompts until a value is entered. |
 | 3 | Log directory | **Required.** Checks if the path exists and is writable; attempts `mkdir -p` if not; re-prompts on failure. |
 | 4–8 | All others | Optional — press **ENTER** to accept the shown default. |
 
 Path inputs accept shell variables (`$HOME`, `$USER`, `~`). They are expanded immediately so the stored value is always an absolute path.
+
+### Bumblebee repo check
+
+Immediately after step 1, the wizard verifies the bumblebee repo exists at the given path:
+
+- **Found** → confirms with `✔ Bumblebee repo found.`
+- **Not found** → offers to clone `https://github.com/SocketDev/socket-bumblebee` directly. You can confirm the default path or enter a different install location. If you decline, the path is saved and you can install manually before running scans.
+
+The wizard also checks whether the `bumblebee` CLI is available in `PATH` and shows a warning with the install URL if not.
+
+The same clone-on-demand prompt appears during normal runs if the repo is missing and `SYNC_CATALOG=yes`.
 
 On completion the wizard writes `.env` into the repo directory. This file is gitignored and stays local to your machine. To re-run the wizard at any time, delete `.env` and restart the script.
 

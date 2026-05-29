@@ -86,6 +86,47 @@ _expand_path() {
     eval echo "$1"
 }
 
+_ensure_bumblebee() {
+    echo -e "  ${CYAN}Checking Bumblebee repo at: ${BOLD}$BUMBLEBEE_DIR${RESET}"
+
+    if [[ -d "$BUMBLEBEE_DIR" ]] && git -C "$BUMBLEBEE_DIR" rev-parse --git-dir &>/dev/null; then
+        echo -e "  ${GREEN}✔ Bumblebee repo found.${RESET}"
+    else
+        echo -e "  ${YELLOW}Bumblebee repo not found at: $BUMBLEBEE_DIR${RESET}"
+        echo ""
+        read -rp "  Clone it now? [Y/n]: " _clone_yn
+        _clone_yn=$(echo "${_clone_yn:-y}" | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$_clone_yn" == "y" || "$_clone_yn" == "yes" ]]; then
+            echo -e "  ${DIM}Install location [default: $BUMBLEBEE_DIR — press ENTER to confirm]:${RESET}"
+            read -re -p "  > " _clone_dest
+            if [[ -n "$_clone_dest" ]]; then
+                BUMBLEBEE_DIR=$(_expand_path "$_clone_dest")
+            fi
+
+            echo ""
+            echo -e "  ${CYAN}Cloning https://github.com/SocketDev/socket-bumblebee${RESET}"
+            echo -e "  ${CYAN}        into $BUMBLEBEE_DIR ...${RESET}"
+            if git clone https://github.com/SocketDev/socket-bumblebee "$BUMBLEBEE_DIR"; then
+                echo -e "  ${GREEN}✔ Bumblebee cloned to: $BUMBLEBEE_DIR${RESET}"
+            else
+                echo -e "  ${RED}Clone failed. Install manually and update BUMBLEBEE_DIR in .env before scanning.${RESET}"
+            fi
+        else
+            echo -e "  ${YELLOW}Skipped. Update BUMBLEBEE_DIR in .env and re-run when bumblebee is installed.${RESET}"
+        fi
+    fi
+
+    echo ""
+    if command -v bumblebee &>/dev/null; then
+        echo -e "  ${GREEN}✔ Bumblebee CLI available: $(command -v bumblebee)${RESET}"
+    else
+        echo -e "  ${YELLOW}⚠  Bumblebee CLI not found in PATH.${RESET}"
+        echo -e "  ${DIM}  Follow the install instructions at: https://github.com/SocketDev/socket-bumblebee${RESET}"
+    fi
+    echo ""
+}
+
 _prompt_value() {
     local label="$1" default="$2" varname="$3"
     echo -e "  ${BOLD}${label}${RESET}"
@@ -115,6 +156,7 @@ first_run_setup() {
         echo -e "  ${RED}Path is required.${RESET}\n"
     done
     echo ""
+    _ensure_bumblebee
 
     # [2/8] Required — no default
     while true; do
@@ -361,11 +403,22 @@ fi
 
 if [[ "$SYNC_CATALOG" == "yes" ]]; then
     echo -e "${CYAN}==> Syncing threat catalog...${RESET}"
-    if [[ -d "$BUMBLEBEE_DIR" ]]; then
+    if [[ -d "$BUMBLEBEE_DIR" ]] && git -C "$BUMBLEBEE_DIR" rev-parse --git-dir &>/dev/null; then
         git -C "$BUMBLEBEE_DIR" pull
     else
-        echo -e "${RED}ERROR: Bumblebee directory missing at $BUMBLEBEE_DIR${RESET}"
-        exit 1
+        echo -e "${YELLOW}Bumblebee repo not found at: $BUMBLEBEE_DIR${RESET}"
+        read -rp "  Clone it now? [Y/n]: " _reclone_yn
+        _reclone_yn=$(echo "${_reclone_yn:-y}" | tr '[:upper:]' '[:lower:]')
+        if [[ "$_reclone_yn" == "y" || "$_reclone_yn" == "yes" ]]; then
+            echo -e "${CYAN}  Cloning https://github.com/SocketDev/socket-bumblebee into $BUMBLEBEE_DIR ...${RESET}"
+            if git clone https://github.com/SocketDev/socket-bumblebee "$BUMBLEBEE_DIR"; then
+                echo -e "${GREEN}  ✔ Cloned successfully.${RESET}"
+            else
+                echo -e "${RED}  Clone failed. Fix BUMBLEBEE_DIR in .env and re-run.${RESET}"; exit 1
+            fi
+        else
+            echo -e "${RED}ERROR: Bumblebee repo required. Fix BUMBLEBEE_DIR in .env and re-run.${RESET}"; exit 1
+        fi
     fi
 else
     echo -e "${YELLOW}-- Threat catalog sync skipped (disabled in config)${RESET}"
