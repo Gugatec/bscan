@@ -119,7 +119,12 @@ first_run_setup() {
     # [2/8] Required — no default
     while true; do
         echo -e "  ${BOLD}[2/8] Scan root path${RESET}"
-        echo -e "  ${DIM}Root directory bumblebee will scan recursively (e.g. / for everything, /Users for all Mac user folders)${RESET}"
+        case "$(uname -s)" in
+            Linux)  _scan_eg="/home (all user directories), / (entire system)" ;;
+            Darwin) _scan_eg="/Users (all user directories), / (entire system)" ;;
+            *)      _scan_eg="/ (entire system), or a specific directory" ;;
+        esac
+        echo -e "  ${DIM}Root directory bumblebee will scan recursively (e.g. ${_scan_eg})${RESET}"
         read -re -p "  > " SCAN_ROOT
         if [[ -n "$SCAN_ROOT" ]]; then SCAN_ROOT=$(_expand_path "$SCAN_ROOT"); break; fi
         echo -e "  ${RED}Path is required.${RESET}\n"

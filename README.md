@@ -8,11 +8,13 @@ An interactive Bash wrapper for the [Bumblebee](https://github.com/SocketDev/soc
 
 | Dependency | Purpose |
 |---|---|
-| `bash` ≥ 3.2 | Script runtime (macOS system bash supported) |
-| [`bumblebee`](https://github.com/SocketDev/socket-bumblebee) | The underlying scanner engine |
+| `bash` ≥ 3.2 | Script runtime (macOS system bash and Linux supported) |
+| [`bumblebee`](https://github.com/SocketDev/socket-bumblebee) | The underlying scanner engine (requires Node.js) |
 | `git` | Syncing bscan and threat catalog repos |
 | `sudo` | Required by `bumblebee scan` |
 | `jq` *(optional)* | Faster/more reliable NDJSON parsing; falls back to `awk` if absent |
+
+The script is compatible with **macOS** and **Linux**. All tools used (`date`, `find`, `sed`, `awk`, `mktemp`, `tee`, `git`) are standard POSIX/GNU utilities available on both platforms.
 
 ---
 
@@ -113,6 +115,8 @@ You can edit `.env` directly or use the **Configuration Control Panel** shown at
 | 4 | `incident-response` | Targeted emergency vulnerability triage |
 
 > **Note:** When `SCAN_ROOT` is set to `/` (filesystem root), a warning is shown before the confirmation prompt indicating the scan will cover the entire system and may take significantly longer.
+>
+> **Tip:** Common values are `/Users` (macOS) or `/home` (Linux) to cover all user directories, or `/` to scan everything. The first-run wizard shows the correct example for your OS automatically.
 
 ---
 
