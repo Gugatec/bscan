@@ -56,18 +56,25 @@ The first time `bscan.sh` is executed it detects the missing `.env` file and lau
   ╚═══════════════════════════════════════════════════════╝
 ```
 
-Path inputs accept shell variables (`$HOME`, `$USER`, `~`). All paths are expanded to absolute values immediately so the stored `.env` is always portable.
+### Path handling — applies to every path input
+
+All path inputs in both the setup wizard and the configuration panel go through the same normalisation pipeline:
+
+1. **Shell expansion** — `~`, `$HOME`, `$USER`, and any other shell variable are expanded immediately.
+2. **Relative-path anchoring** — if the expanded result does not start with `/`, it is automatically prefixed with `$HOME/`. For example, entering `logs/bscan` becomes `/home/user/logs/bscan`. You never need to type the full absolute path.
+
+The stored value in `.env` is always an absolute path, so the config is portable and unambiguous regardless of where bscan is launched from.
 
 ---
 
 ### Step 1 — Bumblebee home directory *(required)*
 
-**What it asks:** The filesystem path where the bumblebee repo should live (e.g. `~/bumblebee`).
+**What it asks:** The filesystem path where the bumblebee repo should live (e.g. `~/bumblebee` or just `bumblebee`).
 
 **What it accomplishes — in order:**
 
 #### 1a. Path normalisation
-If the path you enter does not already end in `/bumblebee`, the wizard appends it automatically so the directory structure is always consistent.
+The path is normalised as described above. If the result does not already end in `/bumblebee`, the wizard appends it automatically so the directory is always named consistently.
 
 #### 1b. Repo clone
 Checks whether a valid git repository exists at the given path.
@@ -124,9 +131,9 @@ Uses `_find_bumblebee_bin` to locate the bumblebee binary across five locations 
 
 ### Step 2 — Scan root path *(required)*
 
-**What it asks:** The root directory bumblebee will scan recursively.
+**What it asks:** The root directory bumblebee will scan recursively (e.g. `/home`, `/Users`, or just `home` which becomes `$HOME/home`).
 
-**What it accomplishes:** Sets `SCAN_ROOT` in `.env`. The wizard shows a platform-appropriate example:
+**What it accomplishes:** Normalises the path, then sets `SCAN_ROOT` in `.env`. The wizard shows a platform-appropriate example:
 - macOS: `/Users` (all user home directories) or `/` (full system)
 - Linux: `/home` (all user home directories) or `/` (full system)
 
@@ -136,13 +143,16 @@ Re-prompts until a non-empty value is entered. When `SCAN_ROOT` is set to `/`, a
 
 ### Step 3 — Log directory *(required)*
 
-**What it asks:** The directory where scan reports will be written.
+**What it asks:** The directory where scan reports will be written (e.g. `~/logs` or just `logs`, which becomes `$HOME/logs`).
 
 **What it accomplishes:**
 
-1. **`/bscan` append prompt** — if the path you enter does not already end in `/bscan`, the wizard offers to append it, keeping all bscan reports in their own subdirectory.
-2. **Directory validation** — checks whether the path exists and is writable.
-3. **Auto-creation** — if the directory does not exist, attempts `mkdir -p`. Re-prompts if creation fails (e.g. permission denied).
+1. **Path normalisation** — the path is normalised as described above. Relative paths are anchored to `$HOME` automatically.
+2. **`/bscan` append prompt** — if the normalised path does not already end in `/bscan`, the wizard offers to append it, keeping all bscan reports in their own subdirectory.
+3. **Directory validation** — checks whether the path exists and is writable.
+4. **Auto-creation** — if the directory does not exist, attempts `mkdir -p`. Re-prompts if creation fails (e.g. permission denied).
+
+This same flow (`_set_log_dir`) is used identically when changing the log directory from the **Configuration Control Panel** (`[5]`), so behaviour is always consistent.
 
 ---
 
@@ -228,11 +238,11 @@ Shown at the start of every run after the first. Displays all current settings a
 
 | Option | What it changes |
 |---|---|
-| `[1]` | Bumblebee repo directory (`BUMBLEBEE_DIR`) |
-| `[2]` | Scan root path (`SCAN_ROOT`) — must exist |
+| `[1]` | Bumblebee repo directory (`BUMBLEBEE_DIR`) — path is normalised and `/bumblebee` is auto-appended if needed |
+| `[2]` | Scan root path (`SCAN_ROOT`) — path is normalised; must already exist |
 | `[3]` | Output format (`OUTPUT_FORMAT`): `human` or `raw` |
 | `[4]` | Auto-export reports (`EXPORT_REPORT`): `yes` or `no` |
-| `[5]` | Log directory (`LOG_DIR`) |
+| `[5]` | Log directory (`LOG_DIR`) — full path flow: normalise → `/bscan` append offer → create if missing → writability check |
 | `[6]` | Retention period (`RETENTION_DAYS`) in days |
 | `[7]` | bscan self-update check (`SYNC_BSCAN_REPO`): `yes` or `no` |
 | `[8]` | Threat catalog sync (`SYNC_CATALOG`): `yes` or `no` |
