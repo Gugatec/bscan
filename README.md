@@ -208,7 +208,7 @@ The script resolves symlinks at runtime, so it always finds its own `.env` and r
 
 After completing step 9, the wizard saves `.env` and continues to the Configuration Control Panel.
 
-> To re-run the wizard at any time, use option **[0] Reconfigure** in the control panel.
+> To re-run the wizard at any time, use option **[R] Reconfigure** in the control panel.
 
 ---
 
@@ -230,13 +230,15 @@ Shown at the start of every run after the first. Displays all current settings a
   [8] Sync Threat Catalog  : yes
   [9] Scan Output Mode     : spinner
   [L] bscan Symlink        : /home/user/.local/bin/bscan → …/bscan.sh
-  [0] Reconfigure (delete .env, re-run wizard)
+
+  [R] Reconfigure (delete .env, re-run wizard)
+  [U] Uninstall
 ---------------------------------------------------------
   [P] PROCEED TO RUN SCAN  |  [Q] QUIT PROGRAM
 =========================================================
 ```
 
-| Option | What it changes |
+| Option | What it changes / does |
 |---|---|
 | `[1]` | Bumblebee repo directory (`BUMBLEBEE_DIR`) — path is normalised and `/bumblebee` is auto-appended if needed |
 | `[2]` | Scan root path (`SCAN_ROOT`) — path is normalised; must already exist |
@@ -248,7 +250,8 @@ Shown at the start of every run after the first. Displays all current settings a
 | `[8]` | Threat catalog sync (`SYNC_CATALOG`): `yes` or `no` |
 | `[9]` | Scan output mode (`SCAN_MODE`): `spinner` or `verbose` |
 | `[L]` | Symlink management — install/recreate or remove the `bscan` command |
-| `[0]` | **Reconfigure** — deletes `.env` and re-runs the full setup wizard (double-confirmed) |
+| `[R]` | **Reconfigure** — deletes `.env` and re-runs the full setup wizard (double-confirmed) |
+| `[U]` | **Uninstall** — guided removal of any or all installed components |
 | `[P]` | Proceed to scan |
 | `[Q]` | Quit |
 
@@ -260,9 +263,47 @@ Shows the current symlink status (`~/.local/bin/bscan → …/bscan.sh` or `not 
 1. **Install / recreate** — creates or replaces the symlink in the first PATH-visible bin directory
 2. **Remove** — deletes the symlink from any known location it may have been placed
 
-### Reconfigure `[0]`
+### Reconfigure `[R]`
 
 Requires two separate confirmations before acting. Once confirmed, deletes `.env` and immediately re-launches the full 9-step wizard so you can start fresh with a clean configuration.
+
+---
+
+## Uninstall `[U]`
+
+Accessed via option `[U]` in the Configuration Control Panel. Walks through removal of every component bscan installed, one at a time or all at once.
+
+### Mode selection
+
+```
+  [1] Step-by-step  — confirm each component individually
+  [2] Full removal  — remove everything at once
+```
+
+- **Step-by-step** — a `Remove? [y/N]` prompt is shown before each component. Answer `N` to skip any component you want to keep.
+- **Full removal** — requires two confirmations upfront, then removes all six components automatically without further prompts.
+
+### Components removed in order
+
+| Step | Component | What happens |
+|---|---|---|
+| 1 | **bscan symlink** | Removes `bscan` from `~/.local/bin`, `~/bin`, and `/usr/local/bin` (whichever exist) |
+| 2 | **bscan log folder** | Deletes `LOG_DIR` and all report files inside it |
+| 3 | **Bumblebee repo** | Deletes `BUMBLEBEE_DIR` including the threat catalog |
+| 4 | **Go** | Runs `brew uninstall go` (if Go was installed via Homebrew), then removes all `GOPATH/bin` and `GOPATH` lines from `~/.bashrc`, `~/.zshrc`, `~/.profile`, and `~/.bash_profile` |
+| 5 | **Homebrew** | Runs the official Homebrew uninstall script, then removes all `brew shellenv` lines from the same rc files |
+| 6 | **bscan itself** | Writes a small cleanup script to `/tmp/bscan_cleanup_<pid>.sh` and launches it in the background immediately after bscan exits, so the running script can cleanly delete its own repo directory |
+
+### rc file cleanup
+
+Steps 4 and 5 use `_remove_from_rc`, which scans the following files and removes any line containing the relevant string — leaving all other content untouched:
+
+- `~/.bashrc`
+- `~/.zshrc`
+- `~/.profile`
+- `~/.bash_profile`
+
+This undoes the PATH and shell-env entries written during installation without affecting anything else in those files.
 
 ---
 
