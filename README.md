@@ -517,6 +517,39 @@ bscan/
 
 ---
 
+## Release Notes
+
+### v1.0.0 *(2026-05-29)*
+
+First public release.
+
+**Setup wizard**
+- 9-step first-run wizard split into two colour-coded sections: **BSCAN** (cyan, steps 1–6) and **BUMBLEBEE** (green, steps 7–9)
+- Step 1: detects whether bscan was installed via git clone or release download; offers to clone the repo to enable auto-updates
+- Step 2: log directory with path normalisation, `/bscan` append prompt, path confirmation before creation, and auto-`mkdir`
+- Step 6: installs `bscan` symlink into the first PATH-visible bin directory
+- Step 7: full bumblebee dependency chain — Linux system package pre-flight (skipped if tools already present), Homebrew (skipped if already installed), Go (skipped if already installed), bumblebee CLI via `go install`
+- All Homebrew and Go PATH entries written to `~/.zshrc` or `~/.bashrc` and activated in the current session immediately
+
+**Configuration Control Panel**
+- Three colour-coded sections: **BSCAN** (cyan, `[1]`–`[6]`), **BUMBLEBEE** (green, `[7]`–`[9]`), **SYSTEM** (yellow, `[L]` `[R]` `[U]`)
+- `[L]` symlink management (install / recreate / remove)
+- `[R]` Reconfigure — deletes `.env` and re-runs the full wizard (double-confirmed)
+- `[U]` Uninstall wizard (see below)
+
+**Uninstall wizard `[U]`**
+- Mode selection: step-by-step (confirm each component) or full removal (double-confirmed up front)
+- Each step-by-step prompt preceded by a detail line showing exactly what will be removed
+- Steps 4 (Go) and 5 (Homebrew) each require four confirmations — all defaulting to No — including typing `UNINSTALL GO` / `UNINSTALL HOMEBREW` exactly and a final bold flashing-red irreversibility warning
+- Step 6 (bscan itself): removes all git remotes and `.git` before scheduling deletion, preventing any further sync; cleanup script runs in background after exit
+
+**Runtime**
+- bumblebee binary auto-discovered across `PATH`, `$GOBIN`, `$GOPATH/bin`, `~/go/bin`, and local repo build
+- Absolute path passed to `sudo` so the binary is found even when sudo's `PATH` strips user-local directories
+- `SYNC_BSCAN_REPO` update check (menu `[1]`) and `SYNC_CATALOG` catalog sync (menu `[9]`) are independent and both enabled by default
+
+---
+
 ## License
 
 MIT
