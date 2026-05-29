@@ -86,8 +86,10 @@ _remove_from_rc() {
 
 _uninstall_step() {
     local _label="$1"
+    local _detail="${2:-}"
     echo ""
     echo -e "  ${BOLD}$_label${RESET}"
+    [[ -n "$_detail" ]] && echo -e "  ${DIM}  $_detail${RESET}"
     read -rp "  Remove? [y/N]: " _yn
     echo "${_yn:-n}" | tr '[:upper:]' '[:lower:]'
 }
@@ -157,20 +159,31 @@ _run_uninstall() {
     esac
 
     # In full mode every step runs automatically; in step mode each is confirmed.
+    # _should_run <label> [detail]
     _should_run() {
         local _label="$1"
+        local _detail="${2:-}"
         if [[ "$_mode" == "full" ]]; then
-            echo -e "  ${CYAN}  → $_label${RESET}"
+            echo ""
+            echo -e "  ${CYAN}${BOLD}  → $_label${RESET}"
+            [[ -n "$_detail" ]] && echo -e "  ${DIM}    $_detail${RESET}"
             return 0
         fi
-        [[ "$(_uninstall_step "$_label")" =~ ^y ]]
+        [[ "$(_uninstall_step "$_label" "$_detail")" =~ ^y ]]
     }
 
     echo ""
     local _remove_bscan=n
 
+    # --- Build symlink detail string showing which paths exist ---
+    local _sym_detail=""
+    for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+        [[ -L "$_d/bscan" ]] && _sym_detail+="$_d/bscan  "
+    done
+    [[ -z "$_sym_detail" ]] && _sym_detail="(no bscan symlink found in known locations)"
+
     # 1. bscan symlink
-    if _should_run "1. Remove bscan command symlink"; then
+    if _should_run "1. Remove bscan command symlink" "$_sym_detail"; then
         local _removed=0
         for _d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
             if [[ -L "$_d/bscan" ]]; then
@@ -183,7 +196,9 @@ _run_uninstall() {
     fi
 
     # 2. bscan log folder
-    if _should_run "2. Remove bscan log folder ($LOG_DIR)"; then
+    local _log_detail="Path: $LOG_DIR"
+    [[ -d "$LOG_DIR" ]] && _log_detail+="  (exists)" || _log_detail+="  (not found — nothing to remove)"
+    if _should_run "2. Remove bscan log folder" "$_log_detail"; then
         if [[ -d "$LOG_DIR" ]]; then
             rm -rf "$LOG_DIR"
             echo -e "  ${GREEN}  ✔ Removed: $LOG_DIR${RESET}"
@@ -193,7 +208,9 @@ _run_uninstall() {
     fi
 
     # 3. Bumblebee repo
-    if _should_run "3. Remove bumblebee repo ($BUMBLEBEE_DIR)"; then
+    local _bb_detail="Path: $BUMBLEBEE_DIR"
+    [[ -d "$BUMBLEBEE_DIR" ]] && _bb_detail+="  (exists)" || _bb_detail+="  (not found — nothing to remove)"
+    if _should_run "3. Remove bumblebee repo (includes threat catalog)" "$_bb_detail"; then
         if [[ -d "$BUMBLEBEE_DIR" ]]; then
             rm -rf "$BUMBLEBEE_DIR"
             echo -e "  ${GREEN}  ✔ Removed: $BUMBLEBEE_DIR${RESET}"
@@ -203,8 +220,10 @@ _run_uninstall() {
     fi
 
     # 4. Uninstall Go
+    local _go_detail="Runs: brew uninstall go  |  Removes GOPATH/bin lines from: ~/.bashrc ~/.zshrc ~/.profile ~/.bash_profile"
     echo ""
     echo -e "  ${BOLD}4. Uninstall Go (via Homebrew) and remove PATH entries from rc files${RESET}"
+    echo -e "  ${DIM}  $_go_detail${RESET}"
     if _confirm_destructive "GO" "UNINSTALL GO"; then
         if command -v brew &>/dev/null && brew list go &>/dev/null 2>&1; then
             echo -e "  ${CYAN}  Uninstalling Go via Homebrew...${RESET}"
@@ -221,8 +240,10 @@ _run_uninstall() {
     fi
 
     # 5. Uninstall Homebrew
+    local _brew_detail="Runs: official Homebrew uninstall script  |  Removes brew shellenv lines from: ~/.bashrc ~/.zshrc ~/.profile ~/.bash_profile"
     echo ""
     echo -e "  ${BOLD}5. Uninstall Homebrew and remove shell env entries from rc files${RESET}"
+    echo -e "  ${DIM}  $_brew_detail${RESET}"
     if _confirm_destructive "HOMEBREW" "UNINSTALL HOMEBREW"; then
         if command -v brew &>/dev/null; then
             echo -e "  ${CYAN}  Running Homebrew uninstall script...${RESET}"
@@ -434,8 +455,20 @@ _append_if_missing() {
 }
 
 # Install Linux Homebrew dependencies via the available package manager.
+# Skips entirely if all required tools are already present.
 # Returns 1 and prints instructions if no supported package manager is found.
 _install_brew_linux_deps() {
+    # Check whether the tools Homebrew needs are already available.
+    local _missing=0
+    for _bin in gcc make curl file git ps; do
+        command -v "$_bin" &>/dev/null || { _missing=1; break; }
+    done
+
+    if [[ "$_missing" -eq 0 ]]; then
+        echo -e "  ${GREEN}✔ Homebrew dependencies already satisfied (gcc, make, curl, file, git, ps).${RESET}"
+        return 0
+    fi
+
     local _pkgs="build-essential procps curl file git"
     echo -e "  ${CYAN}Installing Homebrew dependencies...${RESET}"
 
@@ -465,87 +498,109 @@ _install_brew_linux_deps() {
     fi
 }
 
-# Install Homebrew and wire it into the shell rc
+# Install Homebrew and wire it into the shell rc.
+# If Homebrew is already installed, skips the installer and only ensures
+# the shellenv line is present in the rc file and active in the session.
 _install_homebrew() {
-    local _rc
+    local _rc _brew_prefix
     _rc=$(_shell_rc)
 
-    # On Linux, install system dependencies first
-    if [[ "$(uname -s)" == "Linux" ]]; then
-        echo -e "  ${YELLOW}Linux detected — Homebrew requires system packages before it can install.${RESET}"
-        echo ""
-        echo -e "  ${BOLD}  Install Homebrew dependencies via your package manager now? [Y/n]${RESET}"
-        echo -e "  ${DIM}  Required: build-essential procps curl file git (names vary by distro)${RESET}"
-        read -rp "  > " _dep_yn
-        _dep_yn=$(echo "${_dep_yn:-y}" | tr '[:upper:]' '[:lower:]')
-        if [[ "$_dep_yn" == "y" || "$_dep_yn" == "yes" ]]; then
+    # Locate an existing brew binary first.
+    if command -v brew &>/dev/null; then
+        _brew_prefix="$(brew --prefix 2>/dev/null || dirname "$(command -v brew)")"
+        echo -e "  ${GREEN}✔ Homebrew already installed at: $_brew_prefix${RESET}"
+    elif [[ -x "/opt/homebrew/bin/brew" ]]; then
+        _brew_prefix="/opt/homebrew"
+        echo -e "  ${GREEN}✔ Homebrew already present at: $_brew_prefix${RESET}"
+    elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+        _brew_prefix="/home/linuxbrew/.linuxbrew"
+        echo -e "  ${GREEN}✔ Homebrew already present at: $_brew_prefix${RESET}"
+    elif [[ -x "/usr/local/bin/brew" ]]; then
+        _brew_prefix="/usr/local"
+        echo -e "  ${GREEN}✔ Homebrew already present at: $_brew_prefix${RESET}"
+    else
+        # Homebrew not found — run installer.
+
+        # On Linux, install system dependencies first.
+        if [[ "$(uname -s)" == "Linux" ]]; then
+            echo -e "  ${YELLOW}Linux detected — Homebrew requires system packages before it can install.${RESET}"
             echo ""
-            if ! _install_brew_linux_deps; then
-                echo -e "  ${RED}Dependency install failed or skipped. Install them manually, then re-run bscan.${RESET}"
+            echo -e "  ${BOLD}  Install Homebrew dependencies via your package manager now? [Y/n]${RESET}"
+            echo -e "  ${DIM}  Required: build-essential procps curl file git (names vary by distro)${RESET}"
+            read -rp "  > " _dep_yn
+            _dep_yn=$(echo "${_dep_yn:-y}" | tr '[:upper:]' '[:lower:]')
+            if [[ "$_dep_yn" == "y" || "$_dep_yn" == "yes" ]]; then
+                echo ""
+                if ! _install_brew_linux_deps; then
+                    echo -e "  ${RED}Dependency install failed. Install them manually, then re-run bscan.${RESET}"
+                    return 1
+                fi
+                echo -e "  ${GREEN}✔ Dependencies ready.${RESET}"
+            else
+                echo -e "  ${YELLOW}Skipped. Install these packages first, then re-run bscan:${RESET}"
+                echo -e "  ${DIM}  build-essential procps curl file git${RESET}"
                 return 1
             fi
-            echo -e "  ${GREEN}✔ Dependencies installed.${RESET}"
-        else
-            echo -e "  ${YELLOW}Skipped. Install these packages first, then re-run bscan:${RESET}"
-            echo -e "  ${DIM}  build-essential procps curl file git${RESET}"
+            echo ""
+        fi
+
+        echo -e "  ${CYAN}Installing Homebrew...${RESET}"
+        if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+            echo -e "  ${RED}Homebrew installation failed.${RESET}"
             return 1
         fi
-        echo ""
+
+        # Locate the newly installed binary.
+        if [[ -x "/opt/homebrew/bin/brew" ]]; then
+            _brew_prefix="/opt/homebrew"
+        elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+            _brew_prefix="/home/linuxbrew/.linuxbrew"
+        elif [[ -x "/usr/local/bin/brew" ]]; then
+            _brew_prefix="/usr/local"
+        else
+            echo -e "  ${RED}Could not locate brew binary after install.${RESET}"
+            return 1
+        fi
+        echo -e "  ${GREEN}✔ Homebrew installed: $_brew_prefix${RESET}"
     fi
 
-    echo -e "  ${CYAN}Installing Homebrew...${RESET}"
-    if ! /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
-        echo -e "  ${RED}Homebrew installation failed.${RESET}"
-        return 1
-    fi
-
-    # Determine brew prefix
-    local _brew_prefix
-    if [[ -x "/opt/homebrew/bin/brew" ]]; then
-        _brew_prefix="/opt/homebrew"                        # macOS Apple Silicon
-    elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-        _brew_prefix="/home/linuxbrew/.linuxbrew"           # Linux
-    elif [[ -x "/usr/local/bin/brew" ]]; then
-        _brew_prefix="/usr/local"                           # macOS Intel
-    else
-        echo -e "  ${RED}Could not locate brew binary after install.${RESET}"
-        return 1
-    fi
-
+    # Ensure shellenv line is in rc and active for this session.
     local _shellenv_line="eval \"\$(${_brew_prefix}/bin/brew shellenv)\""
     touch "$_rc"
     _append_if_missing "$_rc" "$_shellenv_line"
-
-    # Activate for the current session
     eval "$("${_brew_prefix}/bin/brew" shellenv)"
-    echo -e "  ${GREEN}✔ Homebrew installed: $_brew_prefix${RESET}"
-    echo -e "  ${GREEN}✔ Shell env written to $_rc${RESET}"
+    echo -e "  ${GREEN}✔ Homebrew shell env active and written to $_rc${RESET}"
 }
 
-# Install Go via Homebrew and wire GOPATH/bin into the shell rc
+# Install Go via Homebrew and wire GOPATH/bin into the shell rc.
+# If Go is already installed, skips the installer and only ensures
+# GOPATH/bin is present in the rc file and exported in the session.
 _install_go() {
-    if ! command -v brew &>/dev/null; then
-        echo -e "  ${RED}Homebrew not found — cannot install Go automatically.${RESET}"
-        return 1
-    fi
-    echo -e "  ${CYAN}Installing Go via Homebrew...${RESET}"
-    if ! brew install go; then
-        echo -e "  ${RED}Go installation failed.${RESET}"
-        return 1
+    if command -v go &>/dev/null; then
+        echo -e "  ${GREEN}✔ Go already installed: $(go version)${RESET}"
+    else
+        if ! command -v brew &>/dev/null; then
+            echo -e "  ${RED}Homebrew not found — cannot install Go automatically.${RESET}"
+            return 1
+        fi
+        echo -e "  ${CYAN}Installing Go via Homebrew...${RESET}"
+        if ! brew install go; then
+            echo -e "  ${RED}Go installation failed.${RESET}"
+            return 1
+        fi
+        # Reload brew-managed shell env so 'go' is visible now.
+        eval "$(brew shellenv)"
+        echo -e "  ${GREEN}✔ Go installed: $(go version)${RESET}"
     fi
 
-    # Reload brew-managed shell env so 'go' is visible now
-    eval "$(brew shellenv)"
-
+    # Ensure GOPATH/bin is in PATH and rc file regardless of how Go was found.
     local _gopath_bin _rc
     _gopath_bin="$(go env GOPATH)/bin"
     _rc=$(_shell_rc)
     touch "$_rc"
     _append_if_missing "$_rc" "export PATH=\"${_gopath_bin}:\$PATH\""
-
     export PATH="${_gopath_bin}:$PATH"
-    echo -e "  ${GREEN}✔ Go installed: $(go version)${RESET}"
-    echo -e "  ${GREEN}✔ GOPATH/bin added to PATH and written to $_rc${RESET}"
+    echo -e "  ${GREEN}✔ GOPATH/bin active and written to $_rc${RESET}"
 }
 
 # Expand shell variables and ~, then anchor relative paths to $HOME.
