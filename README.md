@@ -477,10 +477,38 @@ Files older than `RETENTION_DAYS` days are automatically purged at the start of 
 
 Before each scan, bscan can optionally keep itself and its data current:
 
-- **bscan self-update** (`SYNC_BSCAN_REPO=yes`) — fetches from the remote and, if the local checkout is behind, reports how many commits and offers to `pull --ff-only`. If accepted, bscan updates and exits so you re-run the latest version. Skipped silently when the remote is unreachable.
+- **bscan self-update** (`SYNC_BSCAN_REPO=yes`) — see details below.
 - **Threat catalog** (`SYNC_CATALOG=yes`) — runs `git pull` inside `BUMBLEBEE_DIR` to fetch the latest malicious-package signatures before the scan.
 
 Both are enabled by default and toggled independently via options `[1]` (Auto-Update) and `[9]` (Sync Threat Catalog) in the control panel.
+
+### Self-update detail
+
+When bscan detects it is behind the remote, it offers to update:
+
+```
+==> Checking for bscan updates...
+  bscan is 2 commit(s) behind origin/main.
+  Update now? [Y/n]:
+```
+
+If you accept, bscan **cannot update itself while running** — overwriting the script file mid-execution would risk running half-updated code. Instead it:
+
+1. Writes a small update script to `/tmp/bscan_update_<pid>.sh`
+2. Prints an explanation of why it is exiting
+3. Exits immediately
+4. The background script then:
+   - Stashes any local uncommitted changes (`git stash --include-untracked`) so the pull is never blocked by working-tree conflicts
+   - Runs `git pull --ff-only`
+   - Drops the stash
+   - Prints `✔ bscan updated successfully. Re-run bscan to use the latest version.`
+
+**Re-run bscan** once you see the success message in your terminal.
+
+The update check is skipped silently when:
+- The remote is unreachable
+- There is no upstream tracking branch
+- `$BSCAN_REPO_DIR` is not a git checkout (e.g. installed via release download — use menu option `[1]` to clone the repo and enable updates)
 
 ---
 
@@ -508,12 +536,13 @@ Settings are stored in `.env` (gitignored, auto-generated on first run). A safe 
 ```
 bscan/
 ├── bscan.sh           # Main script
-├── bscan.sh.sha256    # SHA256 checksum for release verification
 ├── .env               # Your local config (gitignored, auto-generated on first run)
 ├── .env-sample        # Safe config template (committed)
-├── .gitignore         # Excludes .env and local session files
+├── .gitignore         # Excludes .env, bscan.sh.sha256, and local session files
 └── README.md          # This file
 ```
+
+> `bscan.sh.sha256` is generated at release time and uploaded as a release asset — it is gitignored and not committed to the repo.
 
 ---
 
@@ -542,6 +571,11 @@ First public release.
 - Each step-by-step prompt preceded by a detail line showing exactly what will be removed
 - Steps 4 (Go) and 5 (Homebrew) each require four confirmations — all defaulting to No — including typing `UNINSTALL GO` / `UNINSTALL HOMEBREW` exactly and a final bold flashing-red irreversibility warning
 - Step 6 (bscan itself): removes all git remotes and `.git` before scheduling deletion, preventing any further sync; cleanup script runs in background after exit
+
+**Self-update**
+- Detached update: bscan exits cleanly and a background script stashes local changes, pulls, then notifies the user to re-run — eliminates "local changes would be overwritten" pull errors
+- Clear on-screen explanation shown before exit so the user knows why bscan stopped and what to do next
+- `bscan.sh.sha256` and other build-generated files added to `.gitignore` to prevent working-tree conflicts on pull
 
 **Runtime**
 - bumblebee binary auto-discovered across `PATH`, `$GOBIN`, `$GOPATH/bin`, `~/go/bin`, and local repo build
