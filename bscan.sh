@@ -114,12 +114,16 @@ _ensure_bumblebee() {
             if git clone "$BUMBLEBEE_REPO_URL" "$BUMBLEBEE_DIR"; then
                 echo -e "  ${GREEN}✔ Bumblebee cloned to: $BUMBLEBEE_DIR${RESET}"
             else
-                echo -e "  ${RED}Clone failed. Install manually and update BUMBLEBEE_DIR in .env before scanning.${RESET}"
+                echo -e "  ${RED}Clone failed. Install manually or try again with a different path.${RESET}"
                 echo -e "  ${DIM}  If the repo is private, authenticate first (gh auth login or an SSH key)${RESET}"
                 echo -e "  ${DIM}  and/or set BUMBLEBEE_REPO_URL in .env to an SSH URL.${RESET}"
+                echo ""
+                return 1
             fi
         else
-            echo -e "  ${YELLOW}Skipped. Update BUMBLEBEE_DIR in .env and re-run when bumblebee is installed.${RESET}"
+            echo -e "  ${YELLOW}Bumblebee is required to continue. Please provide a valid path or clone it.${RESET}"
+            echo ""
+            return 1
         fi
     fi
 
@@ -131,6 +135,7 @@ _ensure_bumblebee() {
         echo -e "  ${DIM}  Follow the install instructions at: $BUMBLEBEE_REPO_URL${RESET}"
     fi
     echo ""
+    return 0
 }
 
 _prompt_value() {
@@ -153,16 +158,25 @@ first_run_setup() {
     echo "  ╚═══════════════════════════════════════════════════════╝"
     echo -e "${RESET}"
 
-    # [1/8] Required — no default
+    # [1/8] Required — loop until bumblebee is confirmed present or cloned
     while true; do
-        echo -e "  ${BOLD}[1/8] Bumblebee home directory${RESET}"
-        echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo ($BUMBLEBEE_REPO_URL)${RESET}"
-        read -re -p "  > " BUMBLEBEE_DIR
-        if [[ -n "$BUMBLEBEE_DIR" ]]; then BUMBLEBEE_DIR=$(_expand_path "$BUMBLEBEE_DIR"); break; fi
-        echo -e "  ${RED}Path is required.${RESET}\n"
+        while true; do
+            echo -e "  ${BOLD}[1/8] Bumblebee home directory${RESET}"
+            echo -e "  ${DIM}Your local clone of the bumblebee GitHub repo ($BUMBLEBEE_REPO_URL)${RESET}"
+            read -re -p "  > " BUMBLEBEE_DIR
+            if [[ -n "$BUMBLEBEE_DIR" ]]; then
+                BUMBLEBEE_DIR=$(_expand_path "$BUMBLEBEE_DIR")
+                if [[ "$(basename "$BUMBLEBEE_DIR")" != "bumblebee" ]]; then
+                    BUMBLEBEE_DIR="${BUMBLEBEE_DIR%/}/bumblebee"
+                    echo -e "  ${DIM}Path adjusted to: $BUMBLEBEE_DIR${RESET}"
+                fi
+                break
+            fi
+            echo -e "  ${RED}Path is required.${RESET}\n"
+        done
+        echo ""
+        if _ensure_bumblebee; then break; fi
     done
-    echo ""
-    _ensure_bumblebee
 
     # [2/8] Required — no default
     while true; do
