@@ -323,18 +323,43 @@ Accessed via option `[U]` in the Configuration Control Panel. Walks through remo
 ```
 
 - **Step-by-step** — a `Remove? [y/N]` prompt is shown before each component. Answer `N` to skip any component you want to keep.
-- **Full removal** — requires two confirmations upfront, then removes all six components automatically without further prompts.
+- **Full removal** — requires two confirmations upfront, then removes all six components in sequence. Go and Homebrew still require their own four-gate confirmation regardless of mode.
 
 ### Components removed in order
 
-| Step | Component | What happens |
+| Step | Component | Confirmation required |
 |---|---|---|
-| 1 | **bscan symlink** | Removes `bscan` from `~/.local/bin`, `~/bin`, and `/usr/local/bin` (whichever exist) |
-| 2 | **bscan log folder** | Deletes `LOG_DIR` and all report files inside it |
-| 3 | **Bumblebee repo** | Deletes `BUMBLEBEE_DIR` including the threat catalog |
-| 4 | **Go** | Runs `brew uninstall go` (if Go was installed via Homebrew), then removes all `GOPATH/bin` and `GOPATH` lines from `~/.bashrc`, `~/.zshrc`, `~/.profile`, and `~/.bash_profile` |
-| 5 | **Homebrew** | Runs the official Homebrew uninstall script, then removes all `brew shellenv` lines from the same rc files |
-| 6 | **bscan itself** | Writes a small cleanup script to `/tmp/bscan_cleanup_<pid>.sh` and launches it in the background immediately after bscan exits, so the running script can cleanly delete its own repo directory |
+| 1 | **bscan symlink** | `Remove? [y/N]` |
+| 2 | **bscan log folder** | `Remove? [y/N]` |
+| 3 | **Bumblebee repo** | `Remove? [y/N]` |
+| 4 | **Go** | Four-gate confirmation (see below) |
+| 5 | **Homebrew** | Four-gate confirmation (see below) |
+| 6 | **bscan itself** | `Remove? [y/N]` — git deregistration runs first |
+
+### Four-gate confirmation — Go and Homebrew
+
+Because uninstalling Go or Homebrew is system-wide and irreversible, each requires four separate confirmations that **all default to No**:
+
+```
+  1. Are you sure you want to uninstall GO? [y/N]
+  2. Confirm again — uninstall GO? [y/N]
+  3. Type exactly: UNINSTALL GO
+     > _
+  4. ⚠  Are you sure that you want to uninstall GO?    ← bold, flashing red
+        This step is not reversible.
+     Final confirmation — proceed? [y/N]
+```
+
+Any wrong answer or mistyped phrase at any gate cancels the step immediately. The same four gates apply to Homebrew using the phrase `UNINSTALL HOMEBREW`.
+
+**What each step removes:**
+
+- **Go (step 4)** — runs `brew uninstall go` if Go is Homebrew-managed, then removes all `GOPATH/bin` and `GOPATH` lines from rc files.
+- **Homebrew (step 5)** — runs the official Homebrew uninstall script, then removes all `brew shellenv` lines from rc files.
+
+### bscan self-removal (step 6)
+
+Before scheduling deletion, bscan removes all git remotes and deletes `.git` from the repo directory, preventing any further sync. `SYNC_BSCAN_REPO` and `SYNC_CATALOG` are set to `no` in the running session so no sync fires before exit. A cleanup script is written to `/tmp/bscan_cleanup_<pid>.sh` and launched in the background after bscan exits, cleanly deleting the repo directory.
 
 ### rc file cleanup
 
